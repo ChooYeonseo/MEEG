@@ -1,0 +1,23 @@
+# Ignore all contents inside the 'data' directory
+data/*
+cache/*
+
+# But, do not ignore the 'compressed' subdirectory itself
+!data/compressed/
+
+# Now, ignore all contents within that 'compressed' subdirectory
+data/compressed/*
+
+# But don't ignore subdirectories themselves
+!data/compressed/*/
+
+# Then ignore everything in those subdirectories
+data/compressed/*/*
+
+# Finally, UN-ignore any .npz file containing the phrase "processed"
+!data/compressed/**/*processed*.npz
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
