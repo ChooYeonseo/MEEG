@@ -45,7 +45,9 @@ class EEGMainWindow(QMainWindow):
         self.app = app  # Store reference to the application for theme switching
         self.current_data = None
         self.current_directory = None
+        self.current_cache_key = None  # Store cache key for current data
         self.reader_thread = None
+        self.electrode_positions = None  # Track electrode positions
         
         # Set up output capture
         self.output_capture = OutputCapture()
@@ -72,7 +74,7 @@ class EEGMainWindow(QMainWindow):
         main_layout.setContentsMargins(15, 15, 15, 15)
         
         # Title
-        title_label = QLabel("EEG Data Analysis Tool")
+        title_label = QLabel("MEEG - Mouse EEG Analysis Tool")
         title_font = QFont()
         title_font.setPointSize(18)
         title_font.setBold(True)
@@ -102,6 +104,11 @@ class EEGMainWindow(QMainWindow):
         self.visualize_button.clicked.connect(self.open_plotting_window)
         self.visualize_button.setEnabled(False)
         button_layout.addWidget(self.visualize_button)
+        
+        self.electrode_plot_button = QPushButton("🧠 Electrode Plotting")
+        self.electrode_plot_button.setMinimumHeight(40)
+        self.electrode_plot_button.clicked.connect(self.open_electrode_plotting_window)
+        button_layout.addWidget(self.electrode_plot_button)
         
         button_layout.addStretch()
         control_layout.addLayout(button_layout)
@@ -141,10 +148,21 @@ class EEGMainWindow(QMainWindow):
         self.terminal_text.setMinimumHeight(200)
         terminal_layout.addWidget(self.terminal_text)
         
+        # Terminal controls
+        terminal_controls_layout = QHBoxLayout()
+        
         # Clear terminal button
         clear_button = QPushButton("Clear Terminal")
         clear_button.clicked.connect(self.clear_terminal)
-        terminal_layout.addWidget(clear_button)
+        terminal_controls_layout.addWidget(clear_button)
+        
+        # MEEG Analysis button
+        self.meeg_analysis_button = QPushButton("🧠 MEEG Analysis")
+        self.meeg_analysis_button.clicked.connect(self.open_meeg_analysis_window)
+        self.meeg_analysis_button.setEnabled(False)  # Initially disabled
+        terminal_controls_layout.addWidget(self.meeg_analysis_button)
+        
+        terminal_layout.addLayout(terminal_controls_layout)
         
         splitter.addWidget(terminal_group)
         
@@ -272,6 +290,7 @@ class EEGMainWindow(QMainWindow):
         
     def start_cache_loading(self, cache_key):
         """Start loading cached data in a separate thread."""
+        self.current_cache_key = cache_key  # Store cache key
         self.read_button.setEnabled(False)
         self.load_cached_button.setEnabled(False)
         self.progress_bar.setVisible(True)
@@ -382,6 +401,8 @@ class EEGMainWindow(QMainWindow):
             self.status_bar.showMessage(f"Loaded {len(results)} files successfully")
             # Enable visualization button when data is loaded
             self.visualize_button.setEnabled(True)
+            # Check if we can enable MEEG Analysis button
+            self.update_meeg_analysis_button_state()
             
     def on_error_occurred(self, error_message):
         """Handle errors during data loading."""
@@ -528,3 +549,48 @@ class EEGMainWindow(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error opening plotting window: {str(e)}")
+    
+    def open_electrode_plotting_window(self):
+        """Open the electrode positioning window."""
+        try:
+            # Import here to avoid circular imports
+            from .electrode_plotting_window import ElectrodePlottingWindow
+            
+            # Create and show electrode plotting window
+            self.electrode_plotting_window = ElectrodePlottingWindow(main_window=self)
+            self.electrode_plotting_window.positions_updated.connect(self.set_electrode_positions)
+            self.electrode_plotting_window.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error opening electrode plotting window: {str(e)}")
+    
+    def update_meeg_analysis_button_state(self):
+        """Update the state of the MEEG Analysis button based on data and electrode positions."""
+        # Enable if both data and electrode positions are available
+        has_data = self.current_data is not None
+        has_electrodes = self.electrode_positions is not None
+        self.meeg_analysis_button.setEnabled(has_data and has_electrodes)
+    
+    def set_electrode_positions(self, positions):
+        """Set electrode positions and update button state."""
+        self.electrode_positions = positions
+        self.update_meeg_analysis_button_state()
+    
+    def open_meeg_analysis_window(self):
+        """Open the MEEG analysis window for electrode mapping."""
+        try:
+            # Import here to avoid circular imports
+            from .electrode_mapping_window import ElectrodeMappingWindow
+            
+            # Create and show electrode mapping window
+            self.mapping_window = ElectrodeMappingWindow(
+                electrode_positions=self.electrode_positions,
+                current_data=self.current_data,
+                cache_directory=str(Path(__file__).parent.parent / "cache"),
+                cache_key=self.current_cache_key,
+                directory_path=self.current_directory
+            )
+            self.mapping_window.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error opening MEEG analysis window: {str(e)}")

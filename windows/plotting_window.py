@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QLabel, QLineEdit, QGroupBox, QSplitter, QTextEdit,
                             QMessageBox, QFormLayout, QComboBox, QCheckBox)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QDoubleValidator
+from PyQt6.QtGui import QDoubleValidator, QShortcut, QKeySequence
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -169,10 +169,12 @@ class PlottingWindow(QWidget):
         
         self.prev_button = QPushButton("← Previous")
         self.prev_button.clicked.connect(self.go_previous)
+        self.prev_button.setToolTip("Navigate to previous time segment\nKeyboard: Left Arrow, Page Up, Ctrl+Left (fast)")
         button_layout.addWidget(self.prev_button)
         
         self.next_button = QPushButton("Next →")
         self.next_button.clicked.connect(self.go_next)
+        self.next_button.setToolTip("Navigate to next time segment\nKeyboard: Right Arrow, Page Down, Ctrl+Right (fast)")
         button_layout.addWidget(self.next_button)
         
         self.update_button = QPushButton("🔄 Update View")
@@ -204,6 +206,32 @@ class PlottingWindow(QWidget):
         # Set splitter proportions (plot takes more space)
         splitter.setSizes([800, 300])
         main_layout.addWidget(splitter)
+        
+        # Setup keyboard shortcuts for navigation
+        self.setup_keyboard_shortcuts()
+        
+    def setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts for navigation."""
+        # Left Arrow or Page Up for Previous
+        self.prev_shortcut1 = QShortcut(QKeySequence(Qt.Key.Key_Left), self)
+        self.prev_shortcut1.activated.connect(self.go_previous)
+        
+        self.prev_shortcut2 = QShortcut(QKeySequence(Qt.Key.Key_PageUp), self)
+        self.prev_shortcut2.activated.connect(self.go_previous)
+        
+        # Right Arrow or Page Down for Next
+        self.next_shortcut1 = QShortcut(QKeySequence(Qt.Key.Key_Right), self)
+        self.next_shortcut1.activated.connect(self.go_next)
+        
+        self.next_shortcut2 = QShortcut(QKeySequence(Qt.Key.Key_PageDown), self)
+        self.next_shortcut2.activated.connect(self.go_next)
+        
+        # Optional: Ctrl+Left/Right for faster navigation (10x duration jumps)
+        self.fast_prev_shortcut = QShortcut(QKeySequence("Ctrl+Left"), self)
+        self.fast_prev_shortcut.activated.connect(self.go_fast_previous)
+        
+        self.fast_next_shortcut = QShortcut(QKeySequence("Ctrl+Right"), self)
+        self.fast_next_shortcut.activated.connect(self.go_fast_next)
         
     def initialize_data_metadata(self):
         """Initialize metadata for all files without loading full data."""
@@ -544,6 +572,29 @@ class PlottingWindow(QWidget):
         new_start = self.current_start_time + self.current_duration
         
         # Check against total duration instead of df_data
+        if new_start + self.current_duration > self.total_duration:
+            new_start = max(0, self.total_duration - self.current_duration)
+            
+        self.current_start_time = new_start
+        self.start_time_input.setText(f"{new_start:.2f}")
+        self.load_time_segment(self.current_start_time, self.current_duration)
+        
+    def go_fast_previous(self):
+        """Navigate to previous time segment with 10x jump."""
+        jump_distance = self.current_duration * 10
+        new_start = self.current_start_time - jump_distance
+        if new_start < 0:
+            new_start = 0
+        self.current_start_time = new_start
+        self.start_time_input.setText(f"{new_start:.2f}")
+        self.load_time_segment(self.current_start_time, self.current_duration)
+        
+    def go_fast_next(self):
+        """Navigate to next time segment with 10x jump."""
+        jump_distance = self.current_duration * 10
+        new_start = self.current_start_time + jump_distance
+        
+        # Check against total duration
         if new_start + self.current_duration > self.total_duration:
             new_start = max(0, self.total_duration - self.current_duration)
             

@@ -1,16 +1,7 @@
-#!/usr/bin/env python3
 """
 EEG Analysis GUI Application - Main Entry Point
 
-A graphical user interface for reading and analyzing EEG data from Intan RHD files.
-
-Main Features:
-- Modern PyQt6 interface
-- File/folder selection dialog
-- Terminal-like output window with real-time feedback
-- Progress tracking for data loading
-- Integration with existing utils/read_intan module
-- Multi-threaded data processing to prevent GUI freezing
+Program Developed by Yeonseo (Sean) Choo - Affiliation: Korea University, College of Medicine
 
 Usage:
     python main.py
@@ -39,10 +30,10 @@ def setup_application():
     app = QApplication(sys.argv)
     
     # Set application metadata
-    app.setApplicationName("EEG Analysis Tool")
+    app.setApplicationName("MEEG")
     app.setApplicationVersion("1.0")
-    app.setOrganizationName("EEG Research")
-    app.setOrganizationDomain("eeg-research.org")
+    app.setOrganizationName("Korea University College of Medicine")
+    app.setOrganizationDomain("http://link.korea.ac.kr/")
     
     # Apply initial theme based on preferences
     current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
