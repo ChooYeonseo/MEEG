@@ -149,7 +149,7 @@ def clean_axes(ax):
 def plot_standard_eeg_data(figure, df_data, cached_segments, 
                           sigma_multiplier=5, y_range_multiplier=5,
                           line_color='black', line_width=0.8, line_alpha=0.8,
-                          global_sigma=None):
+                          global_sigma=None, title=True):
     """
     Plot standard EEG data with consistent scaling and spacing.
     
@@ -232,7 +232,8 @@ def plot_standard_eeg_data(figure, df_data, cached_segments,
     # Set title
     start_time = time_data.iloc[0] if len(time_data) > 0 else 0
     end_time = time_data.iloc[-1] if len(time_data) > 0 else 0
-    figure.suptitle(f'EEG Data: {start_time:.2f}s - {end_time:.2f}s (σ={global_sigma_value:.1f}μV)', 
+    if title:
+        figure.suptitle(f'EEG Data: {start_time:.2f}s - {end_time:.2f}s (σ={global_sigma_value:.1f}μV)', 
                    fontsize=12, fontweight='bold')
     
     return global_sigma_value

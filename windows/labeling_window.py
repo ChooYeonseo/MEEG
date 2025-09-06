@@ -7,6 +7,8 @@ visualize and label mosaic data (differential signals between electrode pairs).
 
 import numpy as np
 import pandas as pd
+import traceback
+import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                             QLabel, QGroupBox, QSplitter, QTextEdit,
@@ -14,9 +16,14 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDoubleValidator, QFont, QShortcut, QKeySequence
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import sys
+
+try:
+    from scipy import signal
+except ImportError:
+    print("Warning: scipy not available. STFT functionality will not work.")
 
 # Add utils directory to Python path
 current_dir = Path(__file__).parent.parent
@@ -28,6 +35,146 @@ try:
     from utils import widget
 except ImportError as e:
     print(f"Import error in labeling_window: {e}")
+
+
+class STFTSpectrogramWindow(QWidget):
+    """Separate window for STFT spectrogram display."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("STFT Spectrogram Analysis")
+        self.setGeometry(200, 200, 1000, 700)
+        
+        # Set window flags
+        self.setWindowFlags(Qt.WindowType.Window | 
+                           Qt.WindowType.WindowMinimizeButtonHint | 
+                           Qt.WindowType.WindowMaximizeButtonHint | 
+                           Qt.WindowType.WindowCloseButtonHint)
+        
+        # Power range parameters (in dB)
+        self.power_min = -30  # Lower bound (constant)
+        self.power_max = 30   # Upper bound (adjustable)
+        
+        # Store current data for re-plotting
+        self.current_data = None
+        
+        layout = QVBoxLayout(self)
+        
+        # Title and controls
+        header_layout = QVBoxLayout()
+        
+        title = QLabel("STFT Spectrogram (2 epochs before to 2 epochs after current)")
+        title_font = QFont()
+        title_font.setBold(True)
+        title_font.setPointSize(12)
+        title.setFont(title_font)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(title)
+        
+        # Power range control buttons
+        controls_layout = QHBoxLayout()
+        
+        # Power range display
+        self.power_range_label = QLabel(f"Power Range: {self.power_min}dB to {self.power_max}dB")
+        self.power_range_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        controls_layout.addWidget(self.power_range_label)
+        
+        # Dimmer button (decrease upper bound)
+        self.dimmer_button = QPushButton("🔅 Dimmer (-2dB)")
+        self.dimmer_button.clicked.connect(self.decrease_power_range)
+        self.dimmer_button.setToolTip("Decrease power range upper bound by 2dB")
+        controls_layout.addWidget(self.dimmer_button)
+        
+        # Brighter button (increase upper bound)
+        self.brighter_button = QPushButton("🔆 Brighter (+2dB)")
+        self.brighter_button.clicked.connect(self.increase_power_range)
+        self.brighter_button.setToolTip("Increase power range upper bound by 2dB")
+        controls_layout.addWidget(self.brighter_button)
+        
+        # Reset button
+        self.reset_button = QPushButton("🔄 Reset")
+        self.reset_button.clicked.connect(self.reset_power_range)
+        self.reset_button.setToolTip("Reset power range to default (-30dB to +30dB)")
+        controls_layout.addWidget(self.reset_button)
+        
+        header_layout.addLayout(controls_layout)
+        layout.addLayout(header_layout)
+        
+        # Spectrogram plot
+        self.spectrogram_figure = Figure(figsize=(12, 8))
+        self.spectrogram_canvas = FigureCanvas(self.spectrogram_figure)
+        layout.addWidget(self.spectrogram_canvas)
+    
+    def decrease_power_range(self):
+        """Decrease the power range upper bound by 2dB."""
+        self.power_max -= 2
+        self.update_power_range_display()
+        if self.current_data:
+            self.replot_spectrogram()
+    
+    def increase_power_range(self):
+        """Increase the power range upper bound by 2dB."""
+        self.power_max += 2
+        self.update_power_range_display()
+        if self.current_data:
+            self.replot_spectrogram()
+    
+    def reset_power_range(self):
+        """Reset power range to default values."""
+        self.power_min = -30
+        self.power_max = 30
+        self.update_power_range_display()
+        if self.current_data:
+            self.replot_spectrogram()
+    
+    def update_power_range_display(self):
+        """Update the power range label."""
+        self.power_range_label.setText(f"Power Range: {self.power_min}dB to {self.power_max}dB")
+    
+    def replot_spectrogram(self):
+        """Replot the spectrogram with current power range settings."""
+        if not self.current_data:
+            return
+            
+        times, frequencies, power_spectrum_db, start_time, epoch_length, working_electrode, spectrogram_start, spectrogram_end = self.current_data
+        
+        # Clear current figure
+        self.spectrogram_figure.clear()
+        ax = self.spectrogram_figure.add_subplot(1, 1, 1)
+        
+        # Plot spectrogram with fixed power range
+        im = ax.pcolormesh(times, frequencies, power_spectrum_db, shading='gouraud', cmap='viridis',
+                          vmin=self.power_min, vmax=self.power_max)
+        
+        # Add colorbar
+        cbar = self.spectrogram_figure.colorbar(im, ax=ax)
+        cbar.set_label('Power (dB)', rotation=270, labelpad=15)
+        
+        # Mark current epoch boundaries with red dashed lines
+        ax.axvline(start_time, color='red', linestyle='--', alpha=0.8, linewidth=2)
+        ax.axvline(start_time + epoch_length, color='red', linestyle='--', alpha=0.8, linewidth=2)
+        
+        # Labels and title
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel('Frequency (Hz)')
+        ax.set_ylim(0, 30)
+        ax.set_title(f'Working Electrode E{working_electrode} - STFT Spectrogram ({spectrogram_start:.1f}s - {spectrogram_end:.1f}s)')
+        
+        self.spectrogram_figure.tight_layout()
+        self.spectrogram_canvas.draw()
+        
+    def update_spectrogram(self, times, frequencies, power_spectrum_db, start_time, epoch_length, working_electrode, spectrogram_start, spectrogram_end):
+        """Update the spectrogram display with new data."""
+        # Store current data for re-plotting when power range changes
+        self.current_data = (times, frequencies, power_spectrum_db, start_time, epoch_length, working_electrode, spectrogram_start, spectrogram_end)
+        
+        # Plot with current power range settings
+        self.replot_spectrogram()
+        
+        # Show the window
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 class MosaicVisualizationWidget(QWidget):
@@ -76,7 +223,6 @@ class MosaicVisualizationWidget(QWidget):
         
         try:
             # Load and display the mouse head image
-            import matplotlib.pyplot as plt
             img = plt.imread(self.image_path)
             ax.imshow(img, extent=[self.x_min, self.x_max, self.y_min, self.y_max], 
                      aspect='equal', origin='upper')
@@ -99,7 +245,6 @@ class MosaicVisualizationWidget(QWidget):
             color = colors[i % len(colors)]
             
             # Draw electrode circle
-            import matplotlib.patches as patches
             circle = patches.Circle((x, y), 0.15, facecolor=color, edgecolor='black', linewidth=1)
             ax.add_patch(circle)
             
@@ -150,7 +295,7 @@ class LabelingWindow(QWidget):
         
         # Time navigation parameters
         self.current_start_time = 0.0
-        self.current_epoch_length = 10.0  # Default epoch length
+        self.current_epoch_length = 4.0  # Default baseline epoch length (4 seconds)
         self.sample_rate = None
         self.total_duration = 0.0
         self.file_metadata = []
@@ -158,13 +303,22 @@ class LabelingWindow(QWidget):
         self.mosaic_data_cache = {}
         self.global_sigma = None  # Fixed global sigma for consistent scaling
         
+        # Fixed y-axis scaling parameters for consistent plots
+        self.fixed_y_limits = None  # Store (y_bottom, y_top) for consistent scaling
+        self.fixed_total_height = None  # Store total height for consistent red line positioning
+        
+        # STFT power range parameters (in dB)
+        self.stft_power_min = -30  # Lower bound (adjustable)
+        self.stft_power_max = 30   # Upper bound (constant)
+        self.current_stft_data = None  # Store current STFT data for re-plotting
+        
         self.setup_ui()
         self.initialize_data()
         
     def setup_ui(self):
         """Set up the labeling window UI."""
         self.setWindowTitle("Mosaic Data Labeling")
-        self.setGeometry(150, 150, 1400, 900)
+        self.setGeometry(150, 150, 1400, 1200)  # Increased height for vertical stacking
         
         # Set window flags to ensure it's movable and resizable
         self.setWindowFlags(Qt.WindowType.Window | 
@@ -201,16 +355,16 @@ class LabelingWindow(QWidget):
         self.start_time_input = QLineEdit("0.0")
         self.start_time_input.setValidator(QDoubleValidator(0.0, 999999.0, 3))
         self.start_time_input.setMaximumWidth(100)
-        time_controls.addWidget(QLabel("Starting Time (s):"))
+        self.start_time_input.returnPressed.connect(self.update_all_plots)  # Auto-update on Enter
         time_controls.addWidget(self.start_time_input)
         nav_layout.addRow("Start Time:", time_controls)
         
         # Epoch length input
         epoch_controls = QHBoxLayout()
-        self.epoch_length_input = QLineEdit("10.0")
+        self.epoch_length_input = QLineEdit("4.0")  # Default to 4.0 seconds for baseline epoch
         self.epoch_length_input.setValidator(QDoubleValidator(0.1, 100.0, 2))
         self.epoch_length_input.setMaximumWidth(100)
-        epoch_controls.addWidget(QLabel("Epoch Length (s):"))
+        self.epoch_length_input.returnPressed.connect(self.update_all_plots)  # Auto-update on Enter
         epoch_controls.addWidget(self.epoch_length_input)
         nav_layout.addRow("Epoch Length:", epoch_controls)
         
@@ -225,19 +379,19 @@ class LabelingWindow(QWidget):
         # Navigation buttons
         button_layout = QHBoxLayout()
         
-        self.prev_button = QPushButton("← Previous")
+        self.prev_button = QPushButton("←")
         self.prev_button.clicked.connect(self.go_previous_epoch)
         button_layout.addWidget(self.prev_button)
         
-        self.next_button = QPushButton("Next →")
+        self.next_button = QPushButton("→")
         self.next_button.clicked.connect(self.go_next_epoch)
         button_layout.addWidget(self.next_button)
         
-        self.update_button = QPushButton("🔄 Update")
-        self.update_button.clicked.connect(self.update_mosaic_plot)
+        self.update_button = QPushButton("🔄")
+        self.update_button.clicked.connect(self.update_all_plots)
         button_layout.addWidget(self.update_button)
         
-        self.recalc_sigma_button = QPushButton("📏 Recalc Sigma")
+        self.recalc_sigma_button = QPushButton("🔄σ")
         self.recalc_sigma_button.clicked.connect(self.recalculate_global_sigma)
         self.recalc_sigma_button.setToolTip("Recalculate global sigma for consistent scaling")
         button_layout.addWidget(self.recalc_sigma_button)
@@ -270,11 +424,19 @@ class LabelingWindow(QWidget):
         ylim_controls.addWidget(QLabel("σ"))
         scaling_layout.addRow("Y-axis Range:", ylim_controls)
         
-        # Apply scaling button
+        # Scaling control buttons
+        scaling_buttons = QHBoxLayout()
         apply_scaling_button = QPushButton("Apply Scaling")
-        apply_scaling_button.clicked.connect(self.update_mosaic_plot)
+        apply_scaling_button.clicked.connect(self.apply_scaling_changes)
         apply_scaling_button.setToolTip("Apply the new scaling parameters to the plot")
-        scaling_layout.addRow("", apply_scaling_button)
+        scaling_buttons.addWidget(apply_scaling_button)
+        
+        reset_scaling_button = QPushButton("🔄 Reset Y-Scale")
+        reset_scaling_button.clicked.connect(self.reset_fixed_scaling)
+        reset_scaling_button.setToolTip("Reset fixed y-axis scaling to current parameters")
+        scaling_buttons.addWidget(reset_scaling_button)
+        
+        scaling_layout.addRow("Controls:", scaling_buttons)
         
         left_layout.addWidget(scaling_group)
         
@@ -303,10 +465,104 @@ class LabelingWindow(QWidget):
         plot_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         plot_layout.addWidget(plot_title)
         
-        # Matplotlib figure
+        # Individual electrode selection controls
+        selection_group = QGroupBox("Individual Electrode Analysis (Auto-Generated)")
+        selection_layout = QHBoxLayout(selection_group)
+        
+        selection_layout.addWidget(QLabel("Select Mosaic:"))
+        self.individual_mosaic_combo = QComboBox()
+        self.populate_individual_mosaic_combo()
+        # Connect the combo box to auto-update plots when selection changes
+        self.individual_mosaic_combo.currentIndexChanged.connect(self.update_individual_plots_if_selected)
+        selection_layout.addWidget(self.individual_mosaic_combo)
+        
+        plot_layout.addWidget(selection_group)
+        
+        # Create a splitter for mosaic plot and individual analysis
+        plot_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # Mosaic plot widget
+        mosaic_widget = QWidget()
+        mosaic_layout = QVBoxLayout(mosaic_widget)
+        mosaic_layout.addWidget(QLabel("All Mosaic Relationships (3 Epochs)"))
+        
+        # Matplotlib figure for mosaic data
         self.figure = Figure(figsize=(12, 4))
         self.canvas = FigureCanvas(self.figure)
-        plot_layout.addWidget(self.canvas)
+        mosaic_layout.addWidget(self.canvas)
+        
+        plot_splitter.addWidget(mosaic_widget)
+        
+        # Individual analysis widget (electrode plots and STFT spectrogram)
+        individual_widget = QWidget()
+        individual_layout = QVBoxLayout(individual_widget)
+        
+        # Create a splitter for electrode plots and STFT
+        individual_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # Electrode plots section
+        electrode_widget = QWidget()
+        electrode_layout = QVBoxLayout(electrode_widget)        
+        # Combined electrode plot (working and reference in same figure)
+        self.individual_figure = Figure(figsize=(12, 4), tight_layout=True)
+        self.individual_figure.subplots_adjust(left=0.02, right=0.98, top=0.95, bottom=0.1)
+        self.individual_canvas = FigureCanvas(self.individual_figure)
+        electrode_layout.addWidget(self.individual_canvas)
+        
+        individual_splitter.addWidget(electrode_widget)
+        
+        # STFT section
+        stft_widget = QWidget()
+        stft_layout = QVBoxLayout(stft_widget)
+        
+        # STFT Spectrogram controls and plot
+        stft_group = QGroupBox("STFT Spectrogram Controls")
+        stft_controls_layout = QHBoxLayout(stft_group)
+        
+        # Power range display
+        self.power_range_label = QLabel("Power Range: -30dB to +30dB")
+        stft_controls_layout.addWidget(self.power_range_label)
+        
+        # Dimmer button (narrow range - increase lower bound)
+        self.dimmer_button = QPushButton("🔅 Dimmer (+2dB lower)")
+        self.dimmer_button.clicked.connect(self.decrease_stft_range)
+        self.dimmer_button.setToolTip("Narrow power range by increasing lower bound by 2dB")
+        stft_controls_layout.addWidget(self.dimmer_button)
+        
+        # Brighter button (widen range - decrease lower bound)  
+        self.brighter_button = QPushButton("🔆 Brighter (-2dB lower)")
+        self.brighter_button.clicked.connect(self.increase_stft_range)
+        self.brighter_button.setToolTip("Widen power range by decreasing lower bound by 2dB")
+        stft_controls_layout.addWidget(self.brighter_button)
+        
+        # Reset button
+        self.reset_stft_button = QPushButton("🔄 Reset")
+        self.reset_stft_button.clicked.connect(self.reset_stft_range)
+        self.reset_stft_button.setToolTip("Reset power range to default (-30dB to +30dB)")
+        stft_controls_layout.addWidget(self.reset_stft_button)
+        
+        stft_layout.addWidget(stft_group)
+        
+        # STFT Spectrogram plot
+        self.spectrogram_figure = Figure(figsize=(12, 4), tight_layout=True)
+        self.spectrogram_figure.subplots_adjust(left=0.02, right=0.95, top=0.92, bottom=0.15)
+        self.spectrogram_canvas = FigureCanvas(self.spectrogram_figure)
+        stft_layout.addWidget(QLabel("STFT Spectrogram (2 epochs before to 2 epochs after current)"))
+        stft_layout.addWidget(self.spectrogram_canvas)
+        
+        individual_splitter.addWidget(stft_widget)
+        
+        # Set proportions for individual splitter (electrode:STFT = 1.5:3.5)
+        # Using values proportional to 1.5:3.5 = 150:350
+        individual_splitter.setSizes([150, 350])
+        
+        individual_layout.addWidget(individual_splitter)
+        plot_splitter.addWidget(individual_widget)
+        
+        # Set splitter proportions (mosaic:individual_analysis = 5:5)
+        # Using values proportional to 5:5 = 500:500
+        plot_splitter.setSizes([500, 500])
+        plot_layout.addWidget(plot_splitter)
         
         splitter.addWidget(plot_widget)
         
@@ -354,13 +610,80 @@ class LabelingWindow(QWidget):
             self.update_mosaic_plot()
         except ValueError:
             pass
+    
+    def decrease_stft_range(self):
+        """Narrow STFT power range by increasing lower bound by 2dB (dimmer)."""
+        self.stft_power_min += 2
+        self.update_stft_power_range_display()
+        if self.current_stft_data:
+            self.replot_stft_spectrogram()
+    
+    def increase_stft_range(self):
+        """Widen STFT power range by decreasing lower bound by 2dB (brighter)."""
+        self.stft_power_min -= 2
+        self.update_stft_power_range_display()
+        if self.current_stft_data:
+            self.replot_stft_spectrogram()
+    
+    def reset_stft_range(self):
+        """Reset STFT power range to default values."""
+        self.stft_power_min = -30
+        self.stft_power_max = 30
+        self.update_stft_power_range_display()
+        if self.current_stft_data:
+            self.replot_stft_spectrogram()
+    
+    def update_stft_power_range_display(self):
+        """Update the STFT power range label."""
+        self.power_range_label.setText(f"Power Range: {self.stft_power_min}dB to {self.stft_power_max}dB")
+    
+    def replot_stft_spectrogram(self):
+        """Replot the STFT spectrogram with current power range settings."""
+        if not self.current_stft_data:
+            return
+            
+        times, frequencies, power_spectrum_db, start_time, epoch_length, working_electrode, spectrogram_start, spectrogram_end = self.current_stft_data
+        
+        # Clear current figure
+        self.spectrogram_figure.clear()
+        ax = self.spectrogram_figure.add_subplot(1, 1, 1)
+        
+        # Plot spectrogram with fixed power range
+        im = ax.pcolormesh(times, frequencies, power_spectrum_db, shading='gouraud', cmap='viridis',
+                          vmin=self.stft_power_min, vmax=self.stft_power_max)
+        
+        # Add colorbar
+        cbar = self.spectrogram_figure.colorbar(im, ax=ax)
+        cbar.set_label('Power (dB)', rotation=270, labelpad=15)
+        
+        # Mark current epoch boundaries with red dashed lines
+        ax.axvline(start_time, color='red', linestyle='--', alpha=0.8, linewidth=2)
+        ax.axvline(start_time + epoch_length, color='red', linestyle='--', alpha=0.8, linewidth=2)
+        
+        # Labels and title
+        ax.set_ylabel('Frequency (Hz)')
+        ax.set_ylim(0, 30)
+        
+        # Adjust layout to remove margins and fit window size
+        self.spectrogram_figure.subplots_adjust(left=0.02, right=0.95, top=0.92, bottom=0.15)
+        self.spectrogram_figure.tight_layout(pad=0.5)
+        self.spectrogram_canvas.draw()
         
     def populate_mosaic_combo(self):
-        """Populate the mosaic selection combo box."""
+        """Populate the mosaic selection combo box with relationships in original order."""
         self.mosaic_combo.clear()
+        # Use original order, no sorting
         for rel in self.mosaic_relationships:
             display_text = f"{rel['name']} (E{rel['electrode_a']} - E{rel['electrode_b']})"
             self.mosaic_combo.addItem(display_text)
+    
+    def populate_individual_mosaic_combo(self):
+        """Populate the individual mosaic selection combo box with relationships sorted by name."""
+        self.individual_mosaic_combo.clear()
+        # Use original order, no sorting
+        for rel in self.mosaic_relationships:
+            display_text = f"{rel['name']} (Working: E{rel['electrode_a']}, Ref: E{rel['electrode_b']})"
+            self.individual_mosaic_combo.addItem(display_text, rel)  # Store the relationship data
             
     def initialize_data(self):
         """Initialize data parameters from cached data."""
@@ -402,6 +725,14 @@ class LabelingWindow(QWidget):
             self.calculate_global_sigma()  # Calculate fixed global sigma
             self.update_mosaic_plot()
             
+            # Populate combo boxes
+            self.populate_individual_mosaic_combo()
+            
+            # Auto-select first mosaic if available and plot individual electrodes
+            if self.individual_mosaic_combo.count() > 0:
+                self.individual_mosaic_combo.setCurrentIndex(0)
+                self.update_individual_plots_if_selected()
+            
         except Exception as e:
             print(f"Error initializing labeling window data: {e}")
             import traceback
@@ -440,6 +771,8 @@ class LabelingWindow(QWidget):
     def recalculate_global_sigma(self):
         """Recalculate global sigma and update the plot."""
         self.calculate_global_sigma()
+        # Reset fixed scaling since sigma changed
+        self.reset_fixed_scaling()
         self.update_mosaic_plot()
         self.update_info_display()
         print(f"Global sigma recalculated: {self.global_sigma:.2f} μV")
@@ -596,30 +929,249 @@ class LabelingWindow(QWidget):
             traceback.print_exc()
             return None, None
     
+    def apply_scaling_changes(self):
+        """Apply scaling changes and reset fixed y-axis limits."""
+        # Reset fixed scaling to force recalculation with new parameters
+        self.reset_fixed_scaling()
+        # Update the plot with new scaling
+        self.update_mosaic_plot()
+    
+    def reset_fixed_scaling(self):
+        """Reset the fixed y-axis scaling to allow recalculation."""
+        self.fixed_y_limits = None
+        self.fixed_total_height = None
+        print("Reset fixed y-axis scaling - will recalculate on next plot update")
+    
+    def add_epoch_markers(self, ax, plot_start, plot_end, start_time, baseline_epoch_length):
+        """Add only the red dashed epoch divider line."""
+        try:
+            # Add only vertical dashed line at start_time (current epoch marker)
+            ax.axvline(start_time, color='red', linestyle='--', alpha=1.0, linewidth=2)
+            ax.axvline(start_time + float(self.epoch_length_input.text() or "4.0"), color='red', linestyle='--', alpha=1.0, linewidth=2)
+            
+            
+        except Exception as e:
+            print(f"Warning: Could not add epoch markers: {e}")
+    
+    def plot_individual_electrodes(self):
+        """Plot individual working and reference electrodes in a single figure for the selected mosaic pair."""
+        try:
+            # Get selected mosaic relationship
+            current_index = self.individual_mosaic_combo.currentIndex()
+            if current_index < 0:
+                # Clear plot if no selection
+                self.individual_figure.clear()
+                self.individual_canvas.draw()
+                return
+            
+            relationship = self.individual_mosaic_combo.itemData(current_index)
+            if not relationship:
+                # Clear plot if invalid selection
+                self.individual_figure.clear()
+                self.individual_canvas.draw()
+                return
+            
+            # Get current time parameters
+            start_time = float(self.start_time_input.text() or "0.0")
+            baseline_epoch_length = float(self.epoch_length_input.text() or "4.0")
+            
+            # Plot data for the current 3-epoch range
+            plot_start = max(0, start_time - baseline_epoch_length)
+            plot_end = start_time + (2 * baseline_epoch_length)
+            
+            # Get electrode data
+            working_electrode = relationship.get('electrode_a')
+            reference_electrode = relationship.get('electrode_b')
+            mosaic_name = relationship.get('name', f'E{working_electrode}-E{reference_electrode}')
+            
+            print(f"Plotting individual electrodes: Working E{working_electrode}, Reference E{reference_electrode}")
+            
+            # Get data for both electrodes
+            working_time, working_data = self.get_channel_data_for_electrode(working_electrode, plot_start, plot_end)
+            reference_time, reference_data = self.get_channel_data_for_electrode(reference_electrode, plot_start, plot_end)
+            
+            if working_time is None or reference_time is None:
+                print("Warning: Could not retrieve data for the selected electrodes.")
+                # Clear plot
+                self.individual_figure.clear()
+                self.individual_canvas.draw()
+                return
+            
+            # Create DataFrames for the standard plot function
+            # Combine both electrodes in a single DataFrame
+            working_channel_name = f"Working E{working_electrode}"
+            reference_channel_name = f"Reference E{reference_electrode}"
+            
+            # Ensure both time arrays have the same length
+            min_length = min(len(working_time), len(reference_time))
+            combined_df = pd.DataFrame({
+                'time': working_time[:min_length],
+                working_channel_name: working_data[:min_length],
+                reference_channel_name: reference_data[:min_length]
+            })
+            
+            # Use the widget plotting function with same parameters as mosaic plot
+            from utils.widget import plot_standard_eeg_data
+            
+            # Get user-defined sigma multipliers to match mosaic plot
+            try:
+                sigma_multiplier = float(self.spacing_multiplier_input.text() or "5")
+                y_range_multiplier = float(self.ylim_multiplier_input.text() or "5")
+            except ValueError:
+                sigma_multiplier = 5
+                y_range_multiplier = 5
+            
+            # Plot using standard function with same scaling as mosaic plot
+            plot_standard_eeg_data(
+                self.individual_figure, combined_df, {},
+                sigma_multiplier=sigma_multiplier, 
+                y_range_multiplier=y_range_multiplier,
+                global_sigma=self.global_sigma,
+                title=False
+            )
+            
+            # Add epoch boundary markers
+            ax = self.individual_figure.get_axes()[0]
+            self.add_epoch_markers(ax, plot_start, plot_end, start_time, baseline_epoch_length)
+            
+            # Adjust layout to remove margins and fit window size
+            self.individual_figure.subplots_adjust(left=0.05, right=0.98, top=0.95, bottom=0.1)
+            self.individual_figure.tight_layout(pad=0.5)
+            
+            # # Update title to show mosaic name and electrode info
+            # start_time_display = working_time[0] if len(working_time) > 0 else plot_start
+            # end_time_display = working_time[-1] if len(working_time) > 0 else plot_end
+            # title = f'{mosaic_name}: Working E{working_electrode} & Reference E{reference_electrode} ({start_time_display:.2f}s - {end_time_display:.2f}s)'
+            # self.individual_figure.suptitle(title, fontsize=10, fontweight='bold')
+            
+            self.individual_canvas.draw()
+            
+            print("Individual electrode plot completed successfully")
+            
+        except Exception as e:
+            print(f"Error plotting individual electrodes: {e}")
+            traceback.print_exc()
+            # Clear plot on error
+            self.individual_figure.clear()
+            self.individual_canvas.draw()
+    
+    def plot_stft_spectrogram(self):
+        """Plot STFT spectrogram for the working electrode covering 2 epochs before to 2 epochs after current."""
+        try:
+            # Get selected mosaic relationship
+            current_index = self.individual_mosaic_combo.currentIndex()
+            if current_index < 0:
+                # No selection - clear the plot
+                self.spectrogram_figure.clear()
+                self.spectrogram_canvas.draw()
+                return
+            
+            relationship = self.individual_mosaic_combo.itemData(current_index)
+            if not relationship:
+                # Invalid selection - clear the plot
+                self.spectrogram_figure.clear()
+                self.spectrogram_canvas.draw()
+                return
+            
+            # Get current time parameters
+            start_time = float(self.start_time_input.text() or "0.0")
+            baseline_epoch_length = float(self.epoch_length_input.text() or "4.0")
+            
+            # Calculate time range: 2 epochs before to 2 epochs after current epoch
+            spectrogram_start = max(0, start_time - 2 * baseline_epoch_length)  # 2 epochs before
+            spectrogram_end = start_time + 3 * baseline_epoch_length  # 2 epochs after (current + 2 more)
+            
+            # Clamp to available data
+            if self.total_duration > 0:
+                spectrogram_end = min(spectrogram_end, self.total_duration)
+                # Ensure we have at least 5 epochs if possible
+                min_duration = 5 * baseline_epoch_length
+                if spectrogram_end - spectrogram_start < min_duration:
+                    spectrogram_start = max(0, spectrogram_end - min_duration)
+            
+            working_electrode = relationship.get('electrode_a')
+            print(f"Plotting STFT spectrogram for working electrode E{working_electrode}")
+            print(f"Time range: {spectrogram_start:.2f}s to {spectrogram_end:.2f}s")
+            
+            # Get data for working electrode
+            time_array, electrode_data = self.get_channel_data_for_electrode(working_electrode, spectrogram_start, spectrogram_end)
+            
+            if time_array is None or electrode_data is None:
+                print("Warning: Could not retrieve data for STFT analysis.")
+                self.spectrogram_figure.clear()
+                self.spectrogram_canvas.draw()
+                return
+            
+            # Perform STFT
+            # STFT parameters
+            fs = self.sample_rate or 30000  # Sample rate
+            nperseg = int(baseline_epoch_length * fs)  # Window size = epoch length
+            noverlap = int(nperseg * 0.75)  # 75% overlap
+            
+            print(f"STFT parameters: fs={fs}, nperseg={nperseg}, noverlap={noverlap}")
+            
+            # Compute STFT
+            frequencies, times, Zxx = signal.stft(electrode_data, fs=fs, nperseg=nperseg, noverlap=noverlap)
+            
+            # Filter frequencies to 0-30 Hz range
+            freq_mask = frequencies <= 30
+            frequencies = frequencies[freq_mask]
+            Zxx = Zxx[freq_mask, :]
+            
+            # Convert to power spectrum (magnitude squared)
+            power_spectrum = np.abs(Zxx)**2
+            
+            # Convert to dB scale
+            power_spectrum_db = 10 * np.log10(power_spectrum + 1e-12)  # Add small value to avoid log(0)
+            
+            # Adjust time array to match spectrogram_start
+            times = times + spectrogram_start
+            
+            # Store current data for re-plotting when power range changes
+            self.current_stft_data = (times, frequencies, power_spectrum_db, start_time, baseline_epoch_length, working_electrode, spectrogram_start, spectrogram_end)
+            
+            # Plot the spectrogram
+            self.replot_stft_spectrogram()
+            
+            print("STFT spectrogram completed successfully")
+            
+        except Exception as e:
+            print(f"Error plotting STFT spectrogram: {e}")
+            traceback.print_exc()
+            # Clear plot on error
+            self.spectrogram_figure.clear()
+            self.spectrogram_canvas.draw()
+    
     def update_mosaic_plot(self):
-        """Update the mosaic data plot showing all relationships."""
+        """Update the mosaic data plot showing 3 epochs with current epoch highlighted."""
         try:
             # Get current parameters
             start_time = float(self.start_time_input.text() or "0.0")
-            epoch_length = float(self.epoch_length_input.text() or "10.0")
+            baseline_epoch_length = float(self.epoch_length_input.text() or "4.0")  # Default to 4 seconds
             
-            # Calculate time range with boundary checks
-            plot_start = max(0, start_time - epoch_length)  # Don't go below 0
-            plot_end = start_time + epoch_length
+            # Calculate 3-epoch time range (12 seconds total with 4-second epochs)
+            total_plot_duration = 3 * baseline_epoch_length  # 12 seconds
+            
+            # Current epoch is in the middle, so we show 1 epoch before and 1 epoch after
+            plot_start = max(0, start_time - baseline_epoch_length)  # Don't go below 0
+            plot_end = start_time + (2 * baseline_epoch_length)
             
             # Clamp plot_end to available data duration if we know it
             if self.total_duration > 0:
                 plot_end = min(plot_end, self.total_duration)
+                # If we can't show the full 3 epochs at the end, adjust start time
+                if plot_end - plot_start < total_plot_duration:
+                    plot_start = max(0, plot_end - total_plot_duration)
             
             # Ensure valid time range
             if plot_start >= plot_end:
                 # Adjust if start time is near the end of data
-                if start_time >= self.total_duration - epoch_length:
+                if start_time >= self.total_duration - baseline_epoch_length:
                     plot_end = self.total_duration
-                    plot_start = max(0, plot_end - 2 * epoch_length)
+                    plot_start = max(0, plot_end - total_plot_duration)
                 else:
                     plot_start = 0
-                    plot_end = 2 * epoch_length
+                    plot_end = total_plot_duration
             
             if not self.mosaic_relationships:
                 self.show_message("No Relationships", "No mosaic relationships available.")
@@ -650,7 +1202,9 @@ class LabelingWindow(QWidget):
             if not valid_relationships:
                 self.show_message("No Data", "Could not calculate mosaic data for any relationships in the selected time range.")
                 return
-            
+
+            print(f"Debug: Plotting relationships in original order: {[rel.get('name', '') for rel in valid_relationships]}")
+
             # Use the fixed global sigma for consistent scaling
             global_sigma = self.global_sigma if self.global_sigma is not None else 100.0
             
@@ -669,9 +1223,25 @@ class LabelingWindow(QWidget):
             channel_spacing = sigma_multiplier * global_sigma
             y_range = y_range_multiplier * global_sigma
             
-            # Calculate total height for scale bars
+            # Calculate total height for scale bars and set fixed Y-axis limits FIRST
             total_height = (len(valid_relationships) - 1) * channel_spacing + 2 * y_range
             y_center = 0
+            
+            # Use fixed y-limits if they exist, otherwise calculate and store them
+            if self.fixed_y_limits is None or self.fixed_total_height is None:
+                # First time or recalculation - set and store the limits
+                self.fixed_total_height = total_height
+                y_bottom = y_center - total_height/2
+                y_top = y_center + total_height/2
+                self.fixed_y_limits = (y_bottom, y_top)
+                print(f"Setting fixed y-limits: {y_bottom:.1f} to {y_top:.1f}")
+            else:
+                # Use stored fixed limits for consistent scaling
+                y_bottom, y_top = self.fixed_y_limits
+                total_height = self.fixed_total_height
+            
+            # Set Y-axis limits BEFORE plotting anything to ensure consistent scaling
+            ax.set_ylim(y_bottom, y_top)
             
             # Plot each mosaic relationship on the same axes
             for i, (relationship, (time_array, mosaic_data)) in enumerate(zip(valid_relationships, valid_data)):
@@ -694,11 +1264,13 @@ class LabelingWindow(QWidget):
                 
                 successful_plots += 1
             
-            # Add vertical line at the center time (start_time) - widget.py style
-            ax.axvline(start_time, color='red', linestyle='--', alpha=1.0, linewidth=1)
+            # Add vertical lines at epoch boundaries (gray background lines)
+            # Epoch boundaries are at: plot_start + baseline_epoch_length, plot_start + 2*baseline_epoch_length
+            epoch_boundary_1 = plot_start + baseline_epoch_length
+            epoch_boundary_2 = plot_start + 2 * baseline_epoch_length
             
-            # Set Y-axis limits matching widget.py scaling
-            ax.set_ylim(y_center - total_height/2, y_center + total_height/2)
+            # # Add only vertical dashed line at the center time (start_time) to mark current epoch
+            # ax.axvline(start_time, color='red', linestyle='--', alpha=1.0, linewidth=2)
             
             # Set X-axis limits to fit the data exactly
             if valid_data:
@@ -716,15 +1288,15 @@ class LabelingWindow(QWidget):
             # Add scale bars
             if valid_data:
                 time_array = valid_data[0][0]  # Use first valid time array
-                self.add_scale_bars(ax, time_array, global_sigma, y_center, total_height)
+                self.add_scale_bars(ax, time_array, global_sigma, 0, self.fixed_total_height)
             
             # Add overall title (matching widget.py style)
-            title = f'Mosaic Data: {plot_start:.2f}s - {plot_end:.2f}s (σ={global_sigma:.1f}μV)'
+            title = f'3-Epoch Mosaic Data: {plot_start:.2f}s - {plot_end:.2f}s (Current: {start_time:.2f}s-{start_time + baseline_epoch_length:.2f}s, σ={global_sigma:.1f}μV)'
             self.figure.suptitle(title, fontsize=12, fontweight='bold')
             
             # Update current parameters
             self.current_start_time = start_time
-            self.current_epoch_length = epoch_length
+            self.current_epoch_length = baseline_epoch_length
             
             # Refresh canvas
             self.figure.tight_layout()
@@ -805,6 +1377,7 @@ class LabelingWindow(QWidget):
             new_start = 0
         self.start_time_input.setText(f"{new_start:.3f}")
         self.update_mosaic_plot()
+        self.update_individual_plots_if_selected()
         
     def go_next_epoch(self):
         """Navigate to next epoch."""
@@ -817,18 +1390,44 @@ class LabelingWindow(QWidget):
             
         self.start_time_input.setText(f"{new_start:.3f}")
         self.update_mosaic_plot()
+        self.update_individual_plots_if_selected()
+    
+    def update_individual_plots_if_selected(self):
+        """Update individual electrode plots and STFT spectrogram if a mosaic pair is currently selected."""
+        try:
+            # Check if a mosaic is selected
+            current_index = self.individual_mosaic_combo.currentIndex()
+            if current_index >= 0:
+                # Auto-update individual plots and spectrogram
+                self.plot_individual_electrodes()
+                self.plot_stft_spectrogram()
+                
+        except Exception as e:
+            print(f"Warning: Could not auto-update individual plots: {e}")
+    
+    def update_all_plots(self):
+        """Update both mosaic plot and individual electrode plots."""
+        self.update_mosaic_plot()
+        self.update_individual_plots_if_selected()
     
     def update_info_display(self):
         """Update the information display."""
         try:
             start_time = float(self.start_time_input.text() or "0.0")
-            epoch_length = float(self.epoch_length_input.text() or "10.0")
+            baseline_epoch_length = float(self.epoch_length_input.text() or "4.0")
             
-            # Calculate actual plot range with boundary checks
-            plot_start = max(0, start_time - epoch_length)
-            plot_end = start_time + epoch_length
+            # Calculate actual plot range with boundary checks (3 epochs total)
+            total_plot_duration = 3 * baseline_epoch_length
+            plot_start = max(0, start_time - baseline_epoch_length)
+            plot_end = start_time + (2 * baseline_epoch_length)
             if self.total_duration > 0:
                 plot_end = min(plot_end, self.total_duration)
+                if plot_end - plot_start < total_plot_duration:
+                    plot_start = max(0, plot_end - total_plot_duration)
+            
+            # Calculate epoch boundaries
+            current_epoch_start = start_time
+            current_epoch_end = start_time + baseline_epoch_length
             
             # Get current scaling parameters
             try:
@@ -839,8 +1438,8 @@ class LabelingWindow(QWidget):
                 ylim_multiplier = 5
             
             info_lines = [
-                f"📊 Mosaic Data Analysis",
-                f"═══════════════════════",
+                f"📊 Mosaic Data Analysis - 3 Epoch View",
+                f"═══════════════════════════════════════",
                 f"⏱️ Total Duration: {self.total_duration:.2f}s",
                 f"📡 Sample Rate: {self.sample_rate} Hz" if self.sample_rate else "📡 Sample Rate: Unknown",
                 f"📁 Files: {len(self.file_metadata)}",
@@ -850,14 +1449,17 @@ class LabelingWindow(QWidget):
                 f"  • Channel Spacing: {spacing_multiplier}σ",
                 f"  • Y-axis Range: {ylim_multiplier}σ",
                 "",
-                f"🎯 Current Analysis:",
-                f"  • Center Time: {start_time:.3f}s",
-                f"  • Epoch Length: {epoch_length:.2f}s",
+                f"🎯 3-Epoch Analysis:",
+                f"  • Baseline Epoch Length: {baseline_epoch_length:.2f}s",
+                f"  • Total Plot Duration: {total_plot_duration:.2f}s (3 epochs)",
                 f"  • Plot Range: {plot_start:.3f}s to {plot_end:.3f}s",
+                f"  • 🔴 Current Epoch: {current_epoch_start:.3f}s to {current_epoch_end:.3f}s",
+                f"  • Epoch Boundaries: {plot_start + baseline_epoch_length:.3f}s, {plot_start + 2*baseline_epoch_length:.3f}s",
                 "",
-                f"🔗 All Mosaic Relationships ({len(self.mosaic_relationships)}):",
+                f"🔗 All Mosaic Relationships ({len(self.mosaic_relationships)}) - Original Order:",
             ]
             
+            # Use original order, no sorting
             for i, rel in enumerate(self.mosaic_relationships):
                 name = rel.get('name', f'Mosaic {i+1}')
                 electrode_a = rel.get('electrode_a', 'Unknown')
@@ -883,6 +1485,12 @@ class LabelingWindow(QWidget):
                 "  • Left Arrow: Previous epoch",
                 "  • Right Arrow: Next epoch", 
                 "  • Update Button: Refresh plot",
+                "",
+                "📊 Individual Analysis (Auto-generated):",
+                "  • Working & Reference electrodes in single plot",
+                "  • STFT Spectrogram opens in separate window",
+                "  • STFT shows 2 epochs before to 2 epochs after current",
+                "  • Select different mosaic pair to change analysis focus",
                 "",
                 "🎛️ Scaling Controls:",
                 "  • Adjust Channel Spacing: σ multiplier for vertical separation",
