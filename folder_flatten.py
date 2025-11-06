@@ -2,6 +2,8 @@
 import os, sys, shutil
 from argparse import ArgumentParser
 
+# Inorder to reverse the action of folder_subset.py use this script.
+
 def main():
     ap = ArgumentParser(description="Restore .rhd files from numbered subfolders back to parent directory.")
     ap.add_argument("dir", help="Path to the main folder containing subfolders with .rhd files.")

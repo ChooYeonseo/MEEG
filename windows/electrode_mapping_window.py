@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QLabel, QGroupBox, QTableWidget, QTableWidgetItem,
                             QHeaderView, QMessageBox, QComboBox, QSplitter,
                             QTextEdit, QFormLayout, QInputDialog, QListWidget,
-                            QListWidgetItem, QDialog)
+                            QListWidgetItem, QDialog, QFileDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 import matplotlib.pyplot as plt
@@ -466,26 +466,48 @@ class ElectrodeMappingWindow(QWidget):
         
         # Control buttons
         controls_group = QGroupBox("Controls")
-        controls_layout = QHBoxLayout(controls_group)
+        controls_layout = QVBoxLayout(controls_group)
+        
+        # First row - mapping controls
+        mapping_controls = QHBoxLayout()
         
         clear_mapping_button = QPushButton("Clear All Mappings")
         clear_mapping_button.clicked.connect(self.clear_all_mappings)
-        controls_layout.addWidget(clear_mapping_button)
+        mapping_controls.addWidget(clear_mapping_button)
         
         auto_map_button = QPushButton("Auto-Map Sequential")
         auto_map_button.clicked.connect(self.auto_map_sequential)
-        controls_layout.addWidget(auto_map_button)
+        mapping_controls.addWidget(auto_map_button)
         
         mosaic_button = QPushButton("🔗 Mosaic Relationships")
         mosaic_button.clicked.connect(self.manage_mosaic_relationships)
-        controls_layout.addWidget(mosaic_button)
+        mapping_controls.addWidget(mosaic_button)
         
-        controls_layout.addStretch()
+        mapping_controls.addStretch()
+        controls_layout.addLayout(mapping_controls)
+        
+        # Second row - file operations
+        file_controls = QHBoxLayout()
+        
+        export_button = QPushButton("📤 Export Configuration")
+        export_button.clicked.connect(self.export_configuration)
+        export_button.setToolTip("Export electrode positions, mappings, and relationships to JSON file")
+        file_controls.addWidget(export_button)
+        
+        import_button = QPushButton("📥 Import Configuration")
+        import_button.clicked.connect(self.import_configuration)
+        import_button.setToolTip("Import electrode positions, mappings, and relationships from JSON file")
+        file_controls.addWidget(import_button)
+        
+        file_controls.addStretch()
         
         save_button = QPushButton("💾 Save Mapping")
         save_button.clicked.connect(self.save_mapping)
         save_button.setMinimumHeight(40)
-        controls_layout.addWidget(save_button)
+        save_button.setToolTip("Save current mapping to cache metadata")
+        file_controls.addWidget(save_button)
+        
+        controls_layout.addLayout(file_controls)
         
         right_layout.addWidget(controls_group)
         
@@ -911,3 +933,178 @@ class ElectrodeMappingWindow(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error opening labeling window: {str(e)}")
             print(f"Error opening labeling window: {e}")
+    
+    def export_configuration(self):
+        """Export the complete mosaic configuration to a JSON file."""
+        if not self.electrode_positions:
+            QMessageBox.warning(self, "No Data", "No electrode positions to export.")
+            return
+        
+        # Create configuration dictionary
+        config = {
+            "electrode_positions": self.electrode_positions.copy(),
+            "channel_mapping": {},
+            "mosaic_relationships": self.mosaic_relationships.copy() if self.mosaic_relationships else [],
+            "metadata": {
+                "description": "MEEG Mosaic Configuration",
+                "version": "1.0",
+                "total_electrodes": len(self.electrode_positions),
+                "mapped_electrodes": len(self.channel_mapping),
+                "relationships": len(self.mosaic_relationships) if self.mosaic_relationships else 0
+            }
+        }
+        
+        # Convert channel mapping keys to strings for JSON compatibility
+        for key, value in self.channel_mapping.items():
+            config["channel_mapping"][str(key)] = value
+        
+        # Open file dialog to save
+        default_filename = "mosaic_config.json"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Mosaic Configuration",
+            str(Path.home() / default_filename),
+            "JSON Files (*.json);;All Files (*)"
+        )
+        
+        if not file_path:
+            return  # User cancelled
+        
+        try:
+            # Save to file
+            with open(file_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            QMessageBox.information(
+                self, 
+                "Export Successful", 
+                f"Configuration exported successfully!\n\n"
+                f"File: {Path(file_path).name}\n"
+                f"Electrodes: {config['metadata']['total_electrodes']}\n"
+                f"Mapped: {config['metadata']['mapped_electrodes']}\n"
+                f"Relationships: {config['metadata']['relationships']}"
+            )
+            print(f"Configuration exported to: {file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting configuration:\n{str(e)}")
+            print(f"Error exporting configuration: {e}")
+    
+    def import_configuration(self):
+        """Import mosaic configuration from a JSON file."""
+        # Open file dialog to select file
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Mosaic Configuration",
+            str(Path.home()),
+            "JSON Files (*.json);;All Files (*)"
+        )
+        
+        if not file_path:
+            return  # User cancelled
+        
+        try:
+            # Load configuration from file
+            with open(file_path, 'r') as f:
+                config = json.load(f)
+            
+            # Validate configuration structure
+            if not isinstance(config, dict):
+                raise ValueError("Invalid configuration format: must be a JSON object")
+            
+            # Check for required fields
+            if "electrode_positions" not in config:
+                raise ValueError("Configuration missing 'electrode_positions' field")
+            
+            # Validate electrode positions structure
+            electrode_positions = config["electrode_positions"]
+            if not isinstance(electrode_positions, list):
+                raise ValueError("electrode_positions must be a list")
+            
+            for i, electrode in enumerate(electrode_positions):
+                if not isinstance(electrode, dict):
+                    raise ValueError(f"Electrode {i} must be a dictionary")
+                if not all(key in electrode for key in ['number', 'x', 'y']):
+                    raise ValueError(f"Electrode {i} missing required fields (number, x, y)")
+            
+            # Ask user to confirm import
+            metadata = config.get("metadata", {})
+            total_electrodes = len(electrode_positions)
+            mapped_electrodes = len(config.get("channel_mapping", {}))
+            relationships = len(config.get("mosaic_relationships", []))
+            
+            confirm_msg = (
+                f"Import configuration from {Path(file_path).name}?\n\n"
+                f"Electrodes: {total_electrodes}\n"
+                f"Mapped channels: {mapped_electrodes}\n"
+                f"Mosaic relationships: {relationships}\n\n"
+                f"This will replace current electrode positions and mappings."
+            )
+            
+            reply = QMessageBox.question(
+                self,
+                "Confirm Import",
+                confirm_msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            
+            # Apply the configuration
+            self.electrode_positions = electrode_positions
+            
+            # Load channel mapping
+            self.channel_mapping = {}
+            if "channel_mapping" in config:
+                raw_mapping = config["channel_mapping"]
+                for key, value in raw_mapping.items():
+                    try:
+                        int_key = int(key)
+                        self.channel_mapping[int_key] = value
+                    except (ValueError, TypeError):
+                        self.channel_mapping[key] = value
+            
+            # Load mosaic relationships
+            if "mosaic_relationships" in config:
+                raw_relationships = config["mosaic_relationships"]
+                self.mosaic_relationships = []
+                
+                for i, rel in enumerate(raw_relationships):
+                    if isinstance(rel, list) and len(rel) == 2:
+                        # Old tuple format (stored as list in JSON)
+                        self.mosaic_relationships.append({
+                            'name': f"mosaic {i + 1}",
+                            'electrode_a': rel[0],
+                            'electrode_b': rel[1]
+                        })
+                    elif isinstance(rel, dict):
+                        # New format
+                        self.mosaic_relationships.append(rel.copy())
+            
+            # Update all UI components
+            self.populate_mapping_table()
+            self.update_electrode_info_display()
+            self.update_channels_info_display()
+            self.update_electrode_visualization()
+            
+            QMessageBox.information(
+                self,
+                "Import Successful",
+                f"Configuration imported successfully!\n\n"
+                f"Electrodes: {total_electrodes}\n"
+                f"Mapped: {len(self.channel_mapping)}\n"
+                f"Relationships: {len(self.mosaic_relationships)}"
+            )
+            print(f"Configuration imported from: {file_path}")
+            
+        except json.JSONDecodeError as e:
+            QMessageBox.critical(self, "Import Error", f"Invalid JSON file:\n{str(e)}")
+            print(f"JSON decode error: {e}")
+        except ValueError as e:
+            QMessageBox.critical(self, "Import Error", f"Invalid configuration:\n{str(e)}")
+            print(f"Validation error: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "Import Error", f"Error importing configuration:\n{str(e)}")
+            print(f"Error importing configuration: {e}")

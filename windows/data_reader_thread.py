@@ -31,11 +31,13 @@ class DataReaderThread(QThread):
     error_occurred = pyqtSignal(str)   # Error message
     finished_loading = pyqtSignal()    # Loading complete
     
-    def __init__(self, directory, use_cache=True, save_cache=True):
+    def __init__(self, path_or_files, use_cache=True, save_cache=True, file_type='rhd', sampling_rate=None):
         super().__init__()
-        self.directory = directory
+        self.path_or_files = path_or_files  # Directory path for RHD, list of files for CSV
         self.use_cache = use_cache
         self.save_cache = save_cache
+        self.file_type = file_type  # 'rhd' or 'csv'
+        self.sampling_rate = sampling_rate  # Required for CSV files
         self.output_capture = None
         
     def set_output_capture(self, output_capture):
@@ -50,38 +52,51 @@ class DataReaderThread(QThread):
                 sys.stdout = self.output_capture
                 sys.stderr = self.output_capture
             
-            print(f"Starting to read RHD files from: {self.directory}")
+            file_type_upper = self.file_type.upper()
+            
+            if self.file_type == 'rhd':
+                print(f"Starting to read {file_type_upper} files from: {self.path_or_files}")
+            else:
+                print(f"Starting to read {len(self.path_or_files)} {file_type_upper} file(s)")
             print("=" * 50)
             
-            # Check if we should use cache
-            if self.use_cache:
-                is_cached, cache_key = cache_manager.is_cached(self.directory)
+            # Check if we should use cache (only for RHD files for now)
+            if self.use_cache and self.file_type == 'rhd':
+                is_cached, cache_key = cache_manager.is_cached(self.path_or_files)
                 if is_cached:
                     self.progress_update.emit("Loading from cache...")
                     print(f"Found cached data for directory. Loading from cache...")
-                    results = cache_manager.load_from_cache(self.directory)
+                    results = cache_manager.load_from_cache(self.path_or_files)
                     print(f"Successfully loaded {len(results)} files from cache!")
                     print("=" * 50)
                     self.data_loaded.emit(results)
                     return
             
-            # Read from original files
-            self.progress_update.emit("Reading RHD files...")
+            # Read from original files based on file type
+            self.progress_update.emit(f"Reading {file_type_upper} files...")
             
-            # Use the read_intan module to read the directory
-            results = read_intan.read_rhd_directory(self.directory)
+            if self.file_type == 'rhd':
+                # Use the read_intan module to read RHD files
+                results = read_intan.read_rhd_directory(self.path_or_files)
+                file_description = "RHD files"
+            elif self.file_type == 'csv':
+                # Use CSV reading functionality with file list
+                results = self.read_csv_files(self.path_or_files, self.sampling_rate)
+                file_description = "CSV files"
+            else:
+                raise ValueError(f"Unsupported file type: {self.file_type}")
             
             if not results:
-                print("No RHD files found or no data could be read.")
+                print(f"No {file_description} found or no data could be read.")
                 self.data_loaded.emit([])
             else:
-                print(f"\nSuccessfully loaded {len(results)} RHD files!")
+                print(f"\nSuccessfully loaded {len(results)} {file_description}!")
                 
-                # Save to cache if requested
-                if self.save_cache:
+                # Save to cache if requested (only for RHD files for now)
+                if self.save_cache and self.file_type == 'rhd':
                     self.progress_update.emit("Saving to cache...")
                     print("Saving data to cache for faster future access...")
-                    cache_manager.save_to_cache(self.directory, results)
+                    cache_manager.save_to_cache(self.path_or_files, results)
                     print("Cache saved successfully!")
                 
                 print("=" * 50)
@@ -99,6 +114,60 @@ class DataReaderThread(QThread):
                 sys.stdout = self.output_capture.original_stdout
                 sys.stderr = self.output_capture.original_stderr
             self.finished_loading.emit()
+    
+    def read_csv_files(self, csv_file_paths, sampling_rate):
+        """Read CSV files from a list of file paths.
+        
+        Args:
+            csv_file_paths: List of absolute paths to CSV files
+            sampling_rate: Sampling frequency in Hz
+        """
+        import pandas as pd
+        import numpy as np
+        from pathlib import Path
+        
+        results = []
+        
+        if not csv_file_paths:
+            print("No CSV files provided")
+            return results
+        
+        print(f"Reading {len(csv_file_paths)} CSV file(s)")
+        print(f"Using sampling rate: {sampling_rate} Hz")
+        
+        for csv_file_path in csv_file_paths:
+            csv_file = Path(csv_file_path)
+            try:
+                print(f"Reading: {csv_file.name}...")
+                
+                # Read CSV file
+                df = pd.read_csv(csv_file)
+                
+                # Convert to format similar to RHD data structure
+                # Assuming CSV has columns as channels and rows as time points
+                amplifier_data = df.values.T  # Transpose so channels are rows
+                
+                # Create a result structure similar to RHD format
+                result = {
+                    'amplifier_data': amplifier_data,
+                    'frequency_parameters': {
+                        'amplifier_sample_rate': sampling_rate  # Use provided sampling rate
+                    },
+                    'notes': {
+                        'note1': f'Loaded from CSV: {csv_file.name}',
+                        'note2': f'Sampling rate: {sampling_rate} Hz'
+                    }
+                }
+                
+                results.append((csv_file.name, result, True))
+                duration = amplifier_data.shape[1] / sampling_rate
+                print(f"  Loaded {amplifier_data.shape[0]} channels, {amplifier_data.shape[1]} samples ({duration:.2f}s)")
+                
+            except Exception as e:
+                print(f"  Error reading {csv_file.name}: {str(e)}")
+                results.append((csv_file.name, None, False))
+        
+        return results
 
 
 class CacheLoaderThread(QThread):

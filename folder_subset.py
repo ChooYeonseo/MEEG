@@ -1,3 +1,10 @@
+#########################################################################
+# Script to group .rhd files in a directory into numbered subfolders with a common prefix
+# This action is required if the file size exceeds about 10GB. 
+# If not, the program will crash due to allocation failure. - This may depend on the system.
+#########################################################################
+
+
 #!/usr/bin/env python3
 import os, sys, shutil, re
 from argparse import ArgumentParser

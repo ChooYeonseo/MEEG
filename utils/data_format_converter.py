@@ -30,6 +30,9 @@ def convert_rhd_result_to_dataframe(result, sampling_rate=None):
         raise ValueError("Result dictionary must contain 'amplifier_data'")
     
     amplifier_data = result['amplifier_data']  # Shape: (n_channels, n_samples)
+    time_vector = np.array(result['t_amplifier'])  # Time vector in seconds
+
+    assert len(time_vector) == amplifier_data.shape[1], "Time vector length must match number of samples"
     
     # Get sampling rate
     if sampling_rate is None:
@@ -48,7 +51,7 @@ def convert_rhd_result_to_dataframe(result, sampling_rate=None):
         n_channels, n_samples = amplifier_data.shape
     
     # Create time vector
-    time_vector = np.arange(n_samples) / sampling_rate
+    # time_vector = np.arange(n_samples) / sampling_rate
     
     # Create DataFrame
     data_dict = {'time': time_vector}

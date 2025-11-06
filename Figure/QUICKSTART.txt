@@ -1,0 +1,338 @@
+"""
+QUICK START GUIDE - EEG Power Visualization
+============================================
+
+For immediate use, follow these steps:
+"""
+
+# ============================================================================
+# OPTION 1: RUN FROM COMMAND LINE (Simplest)
+# ============================================================================
+
+"""
+1. Open Terminal
+2. Run:
+   cd /Users/sean/LINK/MEEG
+   python Figure/Figure1E.py
+
+3. A plot window will appear showing power distribution across electrodes
+4. Results saved to: Figure/results/eeg_power_5-15Hz.csv
+"""
+
+# ============================================================================
+# OPTION 2: CUSTOMIZE AND RUN (Most Flexible)
+# ============================================================================
+
+"""
+1. Open Figure/Figure1E.py in your editor
+2. Go to the bottom of the file (look for 'if __name__ == "__main__":')
+3. Modify these values:
+   
+   start_time = 0      # Change to start at any second
+   duration = 5        # Change window duration
+   freq_band = (5, 15) # Change frequency band
+   
+   Example: Analyze alpha waves for 10 seconds starting at minute 1:
+   start_time = 60     # 1 minute
+   duration = 10       # 10 seconds
+   freq_band = (8, 12) # Alpha band
+   
+4. Save the file
+5. Run: python Figure/Figure1E.py
+"""
+
+# ============================================================================
+# OPTION 3: INTERACTIVE JUPYTER NOTEBOOK
+# ============================================================================
+
+"""
+1. Open VS Code
+2. Open: EEG_Power_Visualization.ipynb
+3. Run each cell in order (Shift+Enter)
+4. Modify parameters in each cell as needed
+5. Each cell shows different analysis:
+   - Cell 5: Basic power map
+   - Cell 6: Compare 4 frequency bands
+   - Cell 7: Track power over time
+   - Cell 8: Export to CSV
+   - Cell 9: Statistics
+"""
+
+# ============================================================================
+# FREQUENCY BANDS (Hz)
+# ============================================================================
+
+FREQUENCY_BANDS = {
+    'Delta': (0.5, 4),      # Deep sleep
+    'Theta': (4, 8),        # Drowsiness
+    'Alpha': (8, 12),       # Relaxed
+    'Beta': (12, 30),       # Alert/Thinking
+    'Gamma': (30, 100),     # Cognition
+}
+
+# ============================================================================
+# ELECTRODE LOCATIONS (Following 10-20 System)
+# ============================================================================
+
+"""
+       FPz
+   Fp1     Fp2
+    F3  Fz  F4
+     C3  Cz C4
+     P3  Pz P4
+     T5  T6 (temporal)
+     O1  Oz O2
+     
+Reference: REF (mastoid/REF point)
+
+Color Coding:
+  Red   = High power (active)
+  Blue  = Low power (quiet)
+  Yellow/Orange = Medium power
+"""
+
+# ============================================================================
+# EXAMPLE PARAMETERS
+# ============================================================================
+
+EXAMPLES = {
+    'baseline': {
+        'start_time': 0,
+        'duration': 10,
+        'freq_band': (5, 15),
+        'description': 'Basic 10-second resting state'
+    },
+    'alpha': {
+        'start_time': 30,
+        'duration': 5,
+        'freq_band': (8, 12),
+        'description': 'Alpha band at 30 seconds'
+    },
+    'theta': {
+        'start_time': 0,
+        'duration': 60,
+        'freq_band': (4, 8),
+        'description': 'Full minute of theta band'
+    },
+    'sleep_like': {
+        'start_time': 0,
+        'duration': 30,
+        'freq_band': (0.5, 4),
+        'description': 'Delta band (sleep-like patterns)'
+    }
+}
+
+# ============================================================================
+# DATA INFORMATION
+# ============================================================================
+
+"""
+FILE: processed_b_channels_2000hz_80hz_filtered.csv
+
+Specifications:
+- Sampling Rate: 2000 Hz
+- Number of Channels: 14 EEG channels
+- Total Duration: ~10 minutes (600 seconds)
+- Filter: Band-pass 0.1-80 Hz (already applied)
+- Preprocessing: Already filtered and processed
+
+Channel Names:
+  P4, C2, F4, Pz, O1, T1, T5, P3, C1, Fz, O2, T2, T6, time
+
+Note: Channel mapping to electrode numbers is automatic based on names
+"""
+
+# ============================================================================
+# OUTPUT FORMAT
+# ============================================================================
+
+"""
+Results are saved as CSV:
+
+eeg_power_5-15Hz.csv:
+┌─────────┬────────────────────┐
+│ Channel │ Power_uV2_Hz       │
+├─────────┼────────────────────┤
+│ P4      │ 105.176440         │
+│ C2      │ 87.700545          │
+│ F4      │ 60.452699          │
+│ ...     │ ...                │
+└─────────┴────────────────────┘
+
+Units: µV²/Hz (microvolts squared per hertz)
+       Average power in the frequency band
+"""
+
+# ============================================================================
+# PYTHON CODE SNIPPETS
+# ============================================================================
+
+"""
+If you want to use the code in your own scripts:
+
+import sys
+sys.path.insert(0, '/Users/sean/LINK/MEEG')
+
+from Figure.Figure1E import EEGPowerVisualizer
+
+# Initialize
+visualizer = EEGPowerVisualizer(
+    csv_path="/Volumes/CHOO'S SSD/LINK/1. 박진봉 교수님 데이터/1st_trial/processed_b_channels_2000hz_80hz_filtered.csv",
+    electrode_map_path="/Users/sean/LINK/MEEG/electrode_map/Version2.json",
+    sampling_rate=2000
+)
+
+# Analyze
+fig, ax, power_values = visualizer.visualize(
+    start_time=0,
+    duration=5,
+    freq_band=(8, 12),
+    title="EEG Power: Alpha Band"
+)
+
+# Save results
+visualizer.save_results(
+    output_dir="/Users/sean/LINK/MEEG/Figure/results",
+    power_values=power_values,
+    freq_band=(8, 12)
+)
+
+# Show plot
+import matplotlib.pyplot as plt
+plt.show()
+"""
+
+# ============================================================================
+# COMMON TASKS
+# ============================================================================
+
+"""
+TASK 1: Analyze different time windows
+   Modify 'start_time' parameter
+   start_time = 10  # 10 seconds
+   start_time = 60  # 1 minute
+   start_time = 300 # 5 minutes
+
+TASK 2: Change frequency band
+   freq_band = (5, 15)  # Default (5-15 Hz)
+   freq_band = (8, 12)  # Alpha
+   freq_band = (4, 8)   # Theta
+   freq_band = (0.5, 4) # Delta
+
+TASK 3: Increase time window
+   duration = 5    # 5 seconds
+   duration = 10   # 10 seconds
+   duration = 30   # 30 seconds
+   (Longer = more stable power estimate)
+
+TASK 4: Export multiple bands
+   # Run visualization 3x with different freq_band:
+   visualizer.save_results(..., freq_band=(0.5, 4))  # Delta
+   visualizer.save_results(..., freq_band=(4, 8))    # Theta
+   visualizer.save_results(..., freq_band=(8, 12))   # Alpha
+   visualizer.save_results(..., freq_band=(12, 30))  # Beta
+
+TASK 5: Compare electrodes
+   # Look at the generated CSV file
+   # Find electrodes with highest/lowest power
+   # P4, C2, Pz typically highest (central regions)
+   # O1, O2, T5, T6 typically lower (peripheral)
+"""
+
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+
+"""
+ERROR: "No such file or directory"
+  → Check volume mounted: /Volumes/CHOO'S SSD
+  → Verify file exists at the path
+
+ERROR: "ModuleNotFoundError: No module named 'scipy'"
+  → Activate conda environment: conda activate eeg
+
+ERROR: "Cannot find electrode coordinates"
+  → Check electrode_map/Version2.json exists
+  → Verify JSON file is valid
+
+ERROR: "Zero channels mapped"
+  → Verify channel names match electrode extraction logic
+  → Check CSV column names
+  → Try modifying _extract_electrode_number() method
+
+SLOW PERFORMANCE:
+  → Reduce duration parameter
+  → Reduce number of channels
+  → Use shorter windows for quick tests
+"""
+
+# ============================================================================
+# VISUALIZATION OPTIONS
+# ============================================================================
+
+"""
+Change colormap (red-yellow-blue is default):
+  Available colormaps:
+  - 'RdYlBu_r': Red (high) → Blue (low) ✓ RECOMMENDED
+  - 'hot': Black → Red (high power)
+  - 'cool': Cyan → Magenta
+  - 'jet': Blue → Red
+  - 'viridis': Dark → Bright
+  - 'plasma': Dark → Bright Purple
+
+In code:
+  fig, ax = visualizer.plot_power_on_head(
+      power_values,
+      cmap='hot'  # Change this
+  )
+
+Adjust electrode size:
+  electrode_size=300   # Default (small)
+  electrode_size=500   # Medium
+  electrode_size=700   # Large
+
+Adjust head size:
+  head_scale=8     # Default
+  head_scale=12    # Larger head
+  head_scale=5     # Smaller head
+"""
+
+# ============================================================================
+# FILES CREATED
+# ============================================================================
+
+"""
+New files in your workspace:
+
+1. Figure/Figure1E.py
+   - Main analysis script (standalone)
+   - Run with: python Figure/Figure1E.py
+
+2. EEG_Power_Visualization.ipynb
+   - Interactive Jupyter notebook
+   - Open with: VS Code or Jupyter Lab
+
+3. Figure/EEG_POWER_VISUALIZATION_README.md
+   - Comprehensive documentation
+   - Detailed API reference
+
+4. Figure/QUICKSTART.txt (this file)
+   - Quick reference guide
+"""
+
+# ============================================================================
+# GETTING HELP
+# ============================================================================
+
+"""
+View full documentation:
+  → Open: Figure/EEG_POWER_VISUALIZATION_README.md
+
+View code documentation:
+  >>> help(EEGPowerVisualizer)
+  >>> help(EEGPowerVisualizer.compute_psd_power)
+
+Check code comments:
+  → Open: Figure/Figure1E.py
+  → All methods are well commented
+"""

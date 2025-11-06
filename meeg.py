@@ -20,9 +20,7 @@ from PyQt6.QtWidgets import QApplication
 
 # Import the main window from the windows package
 from windows import EEGMainWindow
-from tokyo_night_theme import apply_tokyo_night_theme
-from normal_theme import apply_normal_theme
-from preferences import preferences_manager
+from theme import apply_tokyo_night_theme, apply_normal_theme, preferences_manager
 
 
 def setup_application():
@@ -31,6 +29,7 @@ def setup_application():
     
     # Set application metadata
     app.setApplicationName("MEEG")
+    app.setApplicationDisplayName("MEEG")  # This ensures the menu shows "MEEG"
     app.setApplicationVersion("1.0")
     app.setOrganizationName("Korea University College of Medicine")
     app.setOrganizationDomain("http://link.korea.ac.kr/")
@@ -39,6 +38,9 @@ def setup_application():
     current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
     if current_theme == 'tokyo_night':
         apply_tokyo_night_theme(app)
+    elif current_theme == 'dark':
+        from theme import apply_dark_theme
+        apply_dark_theme(app)
     else:
         apply_normal_theme(app)
     

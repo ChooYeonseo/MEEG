@@ -12,7 +12,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, 
                             QWidget, QPushButton, QTextEdit, QLabel, QProgressBar,
                             QGroupBox, QFileDialog, QMessageBox, QSplitter,
-                            QStatusBar, QMenuBar, QMenu)
+                            QStatusBar, QMenuBar, QMenu, QApplication)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QTextCursor, QPalette, QColor, QAction
 
@@ -28,7 +28,7 @@ sys.path.insert(0, str(utils_dir))
 
 # Import preferences system
 sys.path.insert(0, str(current_dir))
-from preferences import preferences_manager
+from theme import preferences_manager
 
 try:
     import read_intan
@@ -58,9 +58,9 @@ class EEGMainWindow(QMainWindow):
         
     def init_ui(self):
         """Initialize the user interface."""
-        self.setWindowTitle("EEG Data Analysis Tool")
-        self.setGeometry(100, 100, 1000, 700)
-        
+        self.setWindowTitle("MEEG")
+        #self.setGeometry(100, 100, 1000, 700) # this is the inital window size
+        self.showMaximized()
         # Set up menu bar
         self.setup_menu_bar()
         
@@ -89,7 +89,7 @@ class EEGMainWindow(QMainWindow):
         # Button and directory selection
         button_layout = QHBoxLayout()
         
-        self.read_button = QPushButton("📁 Select Folder & Read Data")
+        self.read_button = QPushButton("📁 Select Folder && Read Data")
         self.read_button.setMinimumHeight(40)
         self.read_button.clicked.connect(self.select_and_read_data)
         button_layout.addWidget(self.read_button)
@@ -99,13 +99,13 @@ class EEGMainWindow(QMainWindow):
         self.load_cached_button.clicked.connect(self.load_cached_project)
         button_layout.addWidget(self.load_cached_button)
         
-        self.visualize_button = QPushButton("📊 Visualize Data")
+        self.visualize_button = QPushButton("Data Preview")
         self.visualize_button.setMinimumHeight(40)
         self.visualize_button.clicked.connect(self.open_plotting_window)
         self.visualize_button.setEnabled(False)
         button_layout.addWidget(self.visualize_button)
         
-        self.electrode_plot_button = QPushButton("🧠 Electrode Plotting")
+        self.electrode_plot_button = QPushButton("Electrode Plotting")
         self.electrode_plot_button.setMinimumHeight(40)
         self.electrode_plot_button.clicked.connect(self.open_electrode_plotting_window)
         button_layout.addWidget(self.electrode_plot_button)
@@ -179,17 +179,42 @@ class EEGMainWindow(QMainWindow):
         """Set up the application menu bar."""
         menubar = self.menuBar()
         
-        # Preferences menu
+        # MEEG menu (main menu - will show as application menu on macOS)
+        meeg_menu = menubar.addMenu('MEEG')
+        
+        # About action
+        about_action = QAction('About', self)
+        about_action.setMenuRole(QAction.MenuRole.AboutRole)  # macOS will move this to app menu
+        about_action.triggered.connect(self.show_about_dialog)
+        meeg_menu.addAction(about_action)
+        
+        # Separator
+        meeg_menu.addSeparator()
+        
+        # Exit action
+        exit_action = QAction('Exit', self)
+        exit_action.setMenuRole(QAction.MenuRole.QuitRole)  # macOS will move this to app menu
+        exit_action.setShortcut('Ctrl+Q')
+        exit_action.triggered.connect(self.exit_application)
+        meeg_menu.addAction(exit_action)
+        
+        # Preferences menu (separate top-level menu for better visibility)
         preferences_menu = menubar.addMenu('Preferences')
         
-        # Theme submenu
+        # Theme submenu under Preferences
         theme_menu = preferences_menu.addMenu('Theme')
         
-        # Normal theme action
-        normal_theme_action = QAction('Normal Theme', self)
-        normal_theme_action.setCheckable(True)
-        normal_theme_action.triggered.connect(lambda: self.change_theme('normal'))
-        theme_menu.addAction(normal_theme_action)
+        # Bright theme action (formerly Normal theme)
+        bright_theme_action = QAction('Bright Theme', self)
+        bright_theme_action.setCheckable(True)
+        bright_theme_action.triggered.connect(lambda: self.change_theme('normal'))
+        theme_menu.addAction(bright_theme_action)
+        
+        # Dark mode theme action
+        dark_theme_action = QAction('Dark Mode', self)
+        dark_theme_action.setCheckable(True)
+        dark_theme_action.triggered.connect(lambda: self.change_theme('dark'))
+        theme_menu.addAction(dark_theme_action)
         
         # Tokyo Night theme action
         tokyo_night_action = QAction('Tokyo Night', self)
@@ -199,7 +224,8 @@ class EEGMainWindow(QMainWindow):
         
         # Store actions for later reference
         self.theme_actions = {
-            'normal': normal_theme_action,
+            'normal': bright_theme_action,
+            'dark': dark_theme_action,
             'tokyo_night': tokyo_night_action
         }
         
@@ -212,7 +238,31 @@ class EEGMainWindow(QMainWindow):
         
     def change_theme(self, theme_name):
         """Change the application theme."""
+        # Save the preference
         preferences_manager.set_setting('theme', theme_name)
+        
+        # Apply the theme immediately
+        self.apply_theme(theme_name)
+        
+    def apply_theme(self, theme_name):
+        """Apply the specified theme to the application."""
+        # Update menu state
+        self.update_theme_menu_state(theme_name)
+        
+        # Apply the theme
+        if self.app:  # Only apply if we have app reference
+            if theme_name == 'tokyo_night':
+                from theme import apply_tokyo_night_theme
+                apply_tokyo_night_theme(self.app)
+            elif theme_name == 'dark':
+                from theme import apply_dark_theme
+                apply_dark_theme(self.app)
+            else:  # normal theme
+                from theme import apply_normal_theme
+                apply_normal_theme(self.app)
+        
+        # Reapply component-specific styles
+        self.setup_styles()
         
     def update_theme_menu_state(self, current_theme):
         """Update the menu state to reflect the current theme."""
@@ -220,60 +270,191 @@ class EEGMainWindow(QMainWindow):
             action.setChecked(theme == current_theme)
             
     def on_theme_changed(self, theme_name):
-        """Handle theme changes from preferences."""
-        self.update_theme_menu_state(theme_name)
+        """Handle theme changes from preferences (when changed externally)."""
+        self.apply_theme(theme_name)
+    
+    def show_about_dialog(self):
+        """Display the About dialog with program information."""
+        about_text = """
+        <h2>MEEG</h2>
+        <h3>Mouse EEG Analysis Tool</h3>
+        <p><b>Version:</b> 1.0</p>
+        <p><b>Build Date:</b> November 2025</p>
+        <p><b>Developed by:</b> Yeonseo (Sean) Choo</p>
+        <p><b>Affiliation:</b> Korea University, College of Medicine</p>
+        <hr>
+        <p>A comprehensive tool for analyzing mouse EEG data with advanced visualization and processing capabilities.</p>
+        """
         
-        # Apply the theme
-        if self.app:  # Only apply if we have app reference
-            if theme_name == 'tokyo_night':
-                from tokyo_night_theme import apply_tokyo_night_theme
-                apply_tokyo_night_theme(self.app)
-            else:  # normal theme
-                from normal_theme import apply_normal_theme
-                apply_normal_theme(self.app)
+        QMessageBox.about(self, "About MEEG", about_text)
+    
+    def exit_application(self):
+        """Exit the application."""
+        # Clean up any running threads
+        if self.reader_thread and self.reader_thread.isRunning():
+            self.reader_thread.quit()
+            self.reader_thread.wait()
         
-        # Reapply component-specific styles
-        self.setup_styles()
+        # Close the application
+        QApplication.quit()
         
     def setup_styles(self):
         """Set up custom styles for the application."""
-        # Import Tokyo Night theme
-        from tokyo_night_theme import TOKYO_NIGHT_STYLES, TOKYO_NIGHT_COLORS
+        # Get current theme
+        current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
+        
+        # Import appropriate theme styles
+        if current_theme == 'tokyo_night':
+            from theme import TOKYO_NIGHT_STYLES as THEME_STYLES
+        elif current_theme == 'dark':
+            from theme import DARK_THEME_STYLES as THEME_STYLES
+        else:  # normal
+            from theme import NORMAL_THEME_STYLES as THEME_STYLES
         
         # Apply specific component styles
         # Note: Main theme is applied globally, these are component-specific overrides
         
-        # Terminal styling with Tokyo Night colors
-        self.terminal_text.setStyleSheet(TOKYO_NIGHT_STYLES['terminal'])
+        # Terminal styling
+        self.terminal_text.setStyleSheet(THEME_STYLES['terminal'])
         
         # Button styling
-        self.read_button.setStyleSheet(TOKYO_NIGHT_STYLES['button_primary'])
-        self.load_cached_button.setStyleSheet(TOKYO_NIGHT_STYLES['button_primary'])
-        self.visualize_button.setStyleSheet(TOKYO_NIGHT_STYLES['button_primary'])
+        self.read_button.setStyleSheet(THEME_STYLES['button_primary'])
+        self.load_cached_button.setStyleSheet(THEME_STYLES['button_primary'])
+        self.visualize_button.setStyleSheet(THEME_STYLES['button_primary'])
         
     def select_and_read_data(self):
         """Select directory and start data reading process."""
         if self.reader_thread and self.reader_thread.isRunning():
             QMessageBox.warning(self, "Warning", "Data reading is already in progress!")
             return
-            
-        # Open directory selection dialog
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select folder containing RHD files",
-            self.current_directory or os.path.expanduser("~")
-        )
         
-        if not directory:
-            self.status_bar.showMessage("No directory selected")
+        # Create custom dialog for file type selection
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel
+        
+        file_type_dialog = QDialog(self)
+        file_type_dialog.setWindowTitle("Select File Type")
+        file_type_dialog.setModal(True)
+        
+        # Main layout
+        dialog_layout = QVBoxLayout(file_type_dialog)
+        
+        # Question label
+        question_label = QLabel("Select the data type.")
+        dialog_layout.addWidget(question_label)
+        
+        # Add spacing
+        dialog_layout.addSpacing(20)
+        
+        # File type buttons (horizontal layout)
+        file_buttons_layout = QHBoxLayout()
+        rhd_button = QPushButton("RHD Files")
+        rhd_button.setMinimumHeight(40)
+        rhd_button.setMinimumWidth(120)
+        csv_button = QPushButton("CSV Files")
+        csv_button.setMinimumHeight(40)
+        csv_button.setMinimumWidth(120)
+        
+        file_buttons_layout.addWidget(rhd_button)
+        file_buttons_layout.addWidget(csv_button)
+        dialog_layout.addLayout(file_buttons_layout)
+        
+        # Add spacing between rows
+        dialog_layout.addSpacing(10)
+        
+        # Cancel button (separate line, aligned right)
+        cancel_layout = QHBoxLayout()
+        cancel_layout.addStretch()
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setMinimumHeight(40)
+        cancel_button.setMinimumWidth(120)
+        cancel_layout.addWidget(cancel_button)
+        dialog_layout.addLayout(cancel_layout)
+        
+        # Store the selected file type
+        selected_file_type = [None]  # Use list to allow modification in nested function
+        
+        def on_rhd_clicked():
+            selected_file_type[0] = 'rhd'
+            file_type_dialog.accept()
+        
+        def on_csv_clicked():
+            selected_file_type[0] = 'csv'
+            file_type_dialog.accept()
+        
+        def on_cancel_clicked():
+            file_type_dialog.reject()
+        
+        # Connect buttons
+        rhd_button.clicked.connect(on_rhd_clicked)
+        csv_button.clicked.connect(on_csv_clicked)
+        cancel_button.clicked.connect(on_cancel_clicked)
+        
+        # Execute dialog
+        if file_type_dialog.exec() != QDialog.DialogCode.Accepted:
+            self.status_bar.showMessage("File selection cancelled")
             return
-            
-        self.current_directory = directory
-        self.dir_label.setText(f"Selected: {directory}")
-        self.dir_label.setStyleSheet("color: blue;")
         
-        # Start reading data in separate thread
-        self.start_data_reading(directory)
+        # Get the selected file type
+        file_type = selected_file_type[0]
+        
+        if file_type == 'rhd':
+            # For RHD files, select a folder
+            file_description = "RHD files"
+            directory = QFileDialog.getExistingDirectory(
+                self,
+                f"Select folder containing {file_description}",
+                self.current_directory or os.path.expanduser("~")
+            )
+            
+            if not directory:
+                self.status_bar.showMessage("No directory selected")
+                return
+            
+            self.current_directory = directory
+            self.dir_label.setText(f"Selected: {directory} ({file_type.upper()} files)")
+            self.dir_label.setStyleSheet("color: red;")
+            
+            # Start reading data in separate thread
+            self.start_data_reading(directory, file_type)
+            
+        else:  # csv
+            # For CSV files, select individual file(s)
+            from PyQt6.QtWidgets import QInputDialog
+            
+            csv_files, _ = QFileDialog.getOpenFileNames(
+                self,
+                "Select CSV file(s)",
+                self.current_directory or os.path.expanduser("~"),
+                "All Files (*)"
+            )
+            
+            if not csv_files:
+                self.status_bar.showMessage("No files selected")
+                return
+            
+            # Ask for sampling frequency
+            sampling_rate, ok = QInputDialog.getDouble(
+                self,
+                "Sampling Frequency",
+                "Enter the sampling frequency (Hz):",
+                20000,  # Default value
+                1,      # Minimum value
+                1000000,  # Maximum value
+                0       # Decimals
+            )
+            
+            if not ok:
+                self.status_bar.showMessage("Sampling frequency not provided")
+                return
+            
+            # Store the first file's directory
+            self.current_directory = str(Path(csv_files[0]).parent)
+            file_names = [Path(f).name for f in csv_files]
+            self.dir_label.setText(f"Selected: {len(csv_files)} CSV file(s)")
+            self.dir_label.setStyleSheet("color: red;")
+            
+            # Start reading data in separate thread with CSV files and sampling rate
+            self.start_data_reading(csv_files, file_type, sampling_rate)
         
     def load_cached_project(self):
         """Load a cached project."""
@@ -309,16 +490,29 @@ class EEGMainWindow(QMainWindow):
         
         self.reader_thread.start()
         
-    def start_data_reading(self, directory):
-        """Start the data reading process in a separate thread."""
+    def start_data_reading(self, path_or_files, file_type='rhd', sampling_rate=None):
+        """Start the data reading process in a separate thread.
+        
+        Args:
+            path_or_files: Directory path (str) for RHD files, or list of file paths for CSV
+            file_type: 'rhd' or 'csv'
+            sampling_rate: Sampling rate in Hz (required for CSV files)
+        """
         self.read_button.setEnabled(False)
         self.load_cached_button.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # Indeterminate progress
-        self.status_bar.showMessage("Selecting directory...")
+        self.status_bar.showMessage(f"Reading {file_type.upper()} files...")
         
         # Create and start reader thread (without saving to cache yet)
-        self.reader_thread = DataReaderThread(directory, use_cache=True, save_cache=False)
+        # Pass file_type and sampling_rate to the DataReaderThread
+        self.reader_thread = DataReaderThread(
+            path_or_files, 
+            use_cache=True, 
+            save_cache=False, 
+            file_type=file_type,
+            sampling_rate=sampling_rate
+        )
         self.reader_thread.set_output_capture(self.output_capture)
         
         # Connect signals

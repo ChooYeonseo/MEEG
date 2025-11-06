@@ -19,7 +19,7 @@ dependencies:
   - pyqt>=6
 
   # if you need progress bars, etc. you can add:
-  # - tqdm
+  - tqdm
   #
   # keep pip section only for things not available on conda-forge
   # pip:
