@@ -6,16 +6,20 @@ This module provides a dialog for selecting and managing cached EEG projects.
 
 from pathlib import Path
 from datetime import datetime
+import sys
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget, 
                             QListWidgetItem, QPushButton, QLabel, QMessageBox,
                             QGroupBox, QTextEdit)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-import sys
 current_dir = Path(__file__).parent.parent
 utils_dir = current_dir / "utils"
 sys.path.insert(0, str(utils_dir))
+
+# Import theme system
+sys.path.insert(0, str(current_dir))
+from theme import preferences_manager
 
 try:
     from cache_manager import cache_manager
@@ -29,8 +33,13 @@ class CachedProjectDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_cache_key = None
+        
+        # Get current theme
+        self.current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
+        
         self.setup_ui()
         self.load_projects()
+        self.apply_theme()
         
     def setup_ui(self):
         """Set up the user interface."""
@@ -94,7 +103,7 @@ class CachedProjectDialog(QDialog):
         self.delete_button.setEnabled(False)
         button_layout.addWidget(self.delete_button)
         
-        self.clear_all_button = QPushButton("🧹 Clear All Cache")
+        self.clear_all_button = QPushButton("Clear All Cache")
         self.clear_all_button.clicked.connect(self.clear_all_cache)
         button_layout.addWidget(self.clear_all_button)
         
@@ -112,6 +121,84 @@ class CachedProjectDialog(QDialog):
         button_layout.addWidget(cancel_button)
         
         layout.addLayout(button_layout)
+    
+    def apply_theme(self):
+        """Apply the current theme to the dialog."""
+        # Import appropriate theme
+        if self.current_theme == 'tokyo_night':
+            from theme import TOKYO_NIGHT_STYLES as THEME_STYLES, TOKYO_NIGHT_COLORS as THEME_COLORS
+        elif self.current_theme == 'dark':
+            from theme import DARK_THEME_STYLES as THEME_STYLES, DARK_COLORS as THEME_COLORS
+        else:  # normal
+            from theme import NORMAL_THEME_STYLES as THEME_STYLES, NORMAL_COLORS as THEME_COLORS
+        
+        # Get hover color (fallback to bg_tertiary if hover not defined)
+        hover_color = THEME_COLORS.get('hover', THEME_COLORS.get('bg_tertiary', '#e8e8e8'))
+        selection_color = THEME_COLORS.get('accent_blue', THEME_COLORS.get('accent_primary', '#6b6b6b'))
+        
+        # Apply dialog background
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {THEME_COLORS['bg_primary']};
+                color: {THEME_COLORS['fg_primary']};
+            }}
+            QLabel {{
+                color: {THEME_COLORS['fg_primary']};
+                background: transparent;
+            }}
+            {THEME_STYLES.get('form_layout', '')}
+        """)
+        
+        # Apply group box styles
+        for widget in self.findChildren(QGroupBox):
+            widget.setStyleSheet(THEME_STYLES['group_box'])
+        
+        # Apply button styles
+        for widget in self.findChildren(QPushButton):
+            widget.setStyleSheet(THEME_STYLES['button_primary'])
+        
+        # Apply list widget styles
+        if hasattr(self, 'project_list'):
+            list_style = THEME_STYLES.get('list_widget', '')
+            if not list_style:
+                # Create custom list style from theme colors
+                list_style = f"""
+                    QListWidget {{
+                        background-color: {THEME_COLORS['bg_secondary']};
+                        color: {THEME_COLORS['fg_primary']};
+                        border: 1px solid {THEME_COLORS['border']};
+                        border-radius: 4px;
+                        padding: 5px;
+                    }}
+                    QListWidget::item {{
+                        padding: 8px;
+                        border-radius: 4px;
+                    }}
+                    QListWidget::item:selected {{
+                        background-color: {selection_color};
+                        color: white;
+                    }}
+                    QListWidget::item:hover {{
+                        background-color: {hover_color};
+                    }}
+                """
+            self.project_list.setStyleSheet(list_style)
+        
+        # Apply text edit styles
+        if hasattr(self, 'details_text'):
+            text_style = THEME_STYLES.get('text_edit', '')
+            if not text_style:
+                # Create custom text edit style from theme colors
+                text_style = f"""
+                    QTextEdit {{
+                        background-color: {THEME_COLORS['bg_secondary']};
+                        color: {THEME_COLORS['fg_primary']};
+                        border: 1px solid {THEME_COLORS['border']};
+                        border-radius: 4px;
+                        padding: 8px;
+                    }}
+                """
+            self.details_text.setStyleSheet(text_style)
         
     def load_projects(self):
         """Load and display cached projects."""
@@ -175,7 +262,7 @@ class CachedProjectDialog(QDialog):
         details = f"""Project Details:
         
 Directory: {project_data["directory_path"]}
-Files: {project_data["num_files"]} RHD files
+Files: {project_data["num_files"]} files
 Cached: {time_str}
 Cache Key: {project_data["cache_key"][:16]}...
 

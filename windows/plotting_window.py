@@ -6,21 +6,25 @@ and efficient data loading for large EEG datasets.
 """
 
 import numpy as np
+import sys
+from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                             QLabel, QLineEdit, QGroupBox, QSplitter, QTextEdit,
-                            QMessageBox, QFormLayout, QComboBox, QCheckBox)
+                            QMessageBox, QFormLayout, QComboBox)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDoubleValidator, QShortcut, QKeySequence
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import sys
-from pathlib import Path
 
 # Add utils directory to Python path
 current_dir = Path(__file__).parent.parent
 utils_dir = current_dir / "utils"
 sys.path.insert(0, str(utils_dir))
+
+# Import theme system
+sys.path.insert(0, str(current_dir))
+from theme import preferences_manager
 
 try:
     import sys
@@ -51,8 +55,12 @@ class PlottingWindow(QWidget):
         self.global_sigma = None  # Global sigma calculated once for entire dataset
         self.sigma_calculated = False  # Flag to track if sigma has been calculated
         
+        # Get current theme
+        self.current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
+        
         self.setup_ui()
         self.initialize_data_metadata()
+        self.apply_theme()
         
     def setup_ui(self):
         """Set up the plotting window UI."""
@@ -76,76 +84,41 @@ class PlottingWindow(QWidget):
         # Time input controls
         time_controls = QHBoxLayout()
         
+        time_controls.addWidget(QLabel("Start (s):"))
         self.start_time_input = QLineEdit("0.0")
         self.start_time_input.setValidator(QDoubleValidator(0.0, 999999.0, 2))
         self.start_time_input.setMaximumWidth(80)
-        time_controls.addWidget(QLabel("Start (s):"))
         time_controls.addWidget(self.start_time_input)
         
+        time_controls.addWidget(QLabel("Duration (s):"))
         self.duration_input = QLineEdit("10.0")
         self.duration_input.setValidator(QDoubleValidator(0.1, 1000.0, 2))
         self.duration_input.setMaximumWidth(80)
-        time_controls.addWidget(QLabel("Duration (s):"))
         time_controls.addWidget(self.duration_input)
         
+        time_controls.addStretch()  # Push everything to the left
+        
         nav_layout.addRow("Time Range:", time_controls)
-        
-        # Plotting style controls
-        style_layout = QHBoxLayout()
-        
-        self.plot_style_combo = QComboBox()
-        self.plot_style_combo.addItems([
-            "Standard Plot", 
-            "Enhanced EEG Plot", 
-            "Differential Signals",
-            "Clinical Scale (7µV/mm)"
-        ])
-        self.plot_style_combo.currentTextChanged.connect(self.on_plot_style_changed)
-        style_layout.addWidget(QLabel("Plot Style:"))
-        style_layout.addWidget(self.plot_style_combo)
-        
-        nav_layout.addRow("Visualization:", style_layout)
-        
-        # Filter controls
-        filter_layout = QHBoxLayout()
-        
-        self.filter_enabled = QCheckBox("Enable Filter")
-        self.filter_enabled.stateChanged.connect(self.on_filter_changed)
-        filter_layout.addWidget(self.filter_enabled)
-        
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItems([
-            "Broadband (0.5-50Hz)",
-            "Clinical (0.5-70Hz)", 
-            "Alpha (8-13Hz)",
-            "Beta (13-30Hz)",
-            "Custom"
-        ])
-        self.filter_combo.setEnabled(False)
-        self.filter_combo.currentTextChanged.connect(self.on_filter_changed)
-        filter_layout.addWidget(self.filter_combo)
-        
-        nav_layout.addRow("Filtering:", filter_layout)
         
         # EEG Display Parameters
         params_layout = QHBoxLayout()
         
         # Sigma multiplier control
+        params_layout.addWidget(QLabel("Spacing (σ×):"))
         self.sigma_multiplier_input = QLineEdit("5.0")
         self.sigma_multiplier_input.setValidator(QDoubleValidator(0.1, 20.0, 1))
         self.sigma_multiplier_input.setMaximumWidth(60)
         self.sigma_multiplier_input.textChanged.connect(self.on_display_params_changed)
         self.sigma_multiplier_input.setToolTip("Channel spacing as multiple of signal standard deviation\n(1.0-3.0: tight spacing, 3.0-7.0: medium, 7.0+: wide spacing)")
-        params_layout.addWidget(QLabel("Spacing (σ×):"))
         params_layout.addWidget(self.sigma_multiplier_input)
         
         # Y-range multiplier control
+        params_layout.addWidget(QLabel("Y-Range (σ×):"))
         self.y_range_multiplier_input = QLineEdit("5.0")
         self.y_range_multiplier_input.setValidator(QDoubleValidator(0.5, 10.0, 1))
         self.y_range_multiplier_input.setMaximumWidth(60)
         self.y_range_multiplier_input.textChanged.connect(self.on_display_params_changed)
         self.y_range_multiplier_input.setToolTip("Y-axis range as multiple of signal standard deviation\n(2.0-4.0: tight range, 4.0-6.0: medium, 6.0+: wide range)")
-        params_layout.addWidget(QLabel("Y-Range (σ×):"))
         params_layout.addWidget(self.y_range_multiplier_input)
         
         # Reset button for display parameters
@@ -161,6 +134,8 @@ class PlottingWindow(QWidget):
         recalc_sigma_btn.clicked.connect(self.recalculate_sigma)
         recalc_sigma_btn.setToolTip("Force recalculation of global sigma value")
         params_layout.addWidget(recalc_sigma_btn)
+        
+        params_layout.addStretch()  # Push everything to the left
         
         nav_layout.addRow("Display:", params_layout)
         
@@ -180,6 +155,8 @@ class PlottingWindow(QWidget):
         self.update_button = QPushButton("🔄 Update View")
         self.update_button.clicked.connect(self.update_plot)
         button_layout.addWidget(self.update_button)
+        
+        button_layout.addStretch()  # Push everything to the left
         
         nav_layout.addRow("Navigation:", button_layout)
         
@@ -209,6 +186,42 @@ class PlottingWindow(QWidget):
         
         # Setup keyboard shortcuts for navigation
         self.setup_keyboard_shortcuts()
+    
+    def apply_theme(self):
+        """Apply the current theme to the window."""
+        # Import appropriate theme
+        if self.current_theme == 'tokyo_night':
+            from theme import TOKYO_NIGHT_STYLES as THEME_STYLES, TOKYO_NIGHT_COLORS as THEME_COLORS
+        elif self.current_theme == 'dark':
+            from theme import DARK_THEME_STYLES as THEME_STYLES, DARK_COLORS as THEME_COLORS
+        else:  # normal
+            from theme import NORMAL_THEME_STYLES as THEME_STYLES, NORMAL_COLORS as THEME_COLORS
+        
+        # Apply window background
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {THEME_COLORS['bg_primary']};
+                color: {THEME_COLORS['fg_primary']};
+            }}
+            {THEME_STYLES.get('form_layout', '')}
+        """)
+        
+        # Apply group box styles
+        for widget in self.findChildren(QGroupBox):
+            widget.setStyleSheet(THEME_STYLES['group_box'])
+        
+        # Apply label styles to ensure consistent backgrounds
+        for widget in self.findChildren(QLabel):
+            if not widget.styleSheet():  # Only if no custom style is set
+                widget.setStyleSheet(THEME_STYLES.get('label', ''))
+        
+        # Apply button styles
+        for widget in self.findChildren(QPushButton):
+            widget.setStyleSheet(THEME_STYLES['button_primary'])
+        
+        # Apply text edit styles
+        for widget in self.findChildren(QTextEdit):
+            widget.setStyleSheet(THEME_STYLES.get('text_edit', ''))
         
     def setup_keyboard_shortcuts(self):
         """Setup keyboard shortcuts for navigation."""
@@ -495,22 +508,11 @@ class PlottingWindow(QWidget):
                 sigma_multiplier = 5.0
                 y_range_multiplier = 5.0
             
-            # Get plot style
-            plot_style = self.plot_style_combo.currentText() if hasattr(self, 'plot_style_combo') else "Standard Plot"
-            
-            # Use appropriate plotting function from widget module
-            if plot_style == "Enhanced EEG Plot":
-                widget.plot_enhanced_eeg_data(self.figure, df_data, self.cached_segments, global_sigma=self.global_sigma)
-            elif plot_style == "Differential Signals":
-                widget.plot_differential_eeg_data(self.figure, df_data, self.cached_segments, global_sigma=self.global_sigma)
-            elif plot_style == "Clinical Scale (7µV/mm)":
-                widget.plot_clinical_scale_eeg_data(self.figure, df_data, self.cached_segments, global_sigma=self.global_sigma)
-            else:
-                # Standard plot with user-configurable parameters
-                widget.plot_standard_eeg_data(self.figure, df_data, self.cached_segments,
-                                            sigma_multiplier=sigma_multiplier,
-                                            y_range_multiplier=y_range_multiplier,
-                                            global_sigma=self.global_sigma)
+            # Use standard plot with user-configurable parameters
+            widget.plot_standard_eeg_data(self.figure, df_data, self.cached_segments,
+                                        sigma_multiplier=sigma_multiplier,
+                                        y_range_multiplier=y_range_multiplier,
+                                        global_sigma=self.global_sigma)
             
             # Adjust layout and refresh
             self.figure.tight_layout()
@@ -522,32 +524,6 @@ class PlottingWindow(QWidget):
         except Exception as e:
             print(f"Error plotting data: {e}")
             self.show_message("Error", f"Error plotting data: {str(e)}")
-    
-    def plot_standard_eeg(self, df_data):
-        """Plot standard EEG view - simplified wrapper."""
-        try:
-            sigma_multiplier = float(self.sigma_multiplier_input.text()) if hasattr(self, 'sigma_multiplier_input') else 5.0
-            y_range_multiplier = float(self.y_range_multiplier_input.text()) if hasattr(self, 'y_range_multiplier_input') else 5.0
-        except ValueError:
-            sigma_multiplier = 5.0
-            y_range_multiplier = 5.0
-        
-        widget.plot_standard_eeg_data(self.figure, df_data, self.cached_segments,
-                                    sigma_multiplier=sigma_multiplier,
-                                    y_range_multiplier=y_range_multiplier,
-                                    global_sigma=self.global_sigma)
-    
-    def plot_enhanced_eeg(self, df_data):
-        """Plot enhanced EEG view - simplified wrapper."""
-        widget.plot_enhanced_eeg_data(self.figure, df_data, self.cached_segments, global_sigma=self.global_sigma)
-    
-    def plot_differential_signals(self, df_data):
-        """Plot differential signals - simplified wrapper."""
-        widget.plot_differential_eeg_data(self.figure, df_data, self.cached_segments, global_sigma=self.global_sigma)
-    
-    def plot_clinical_scale(self, df_data):
-        """Plot with clinical scale - simplified wrapper."""
-        widget.plot_clinical_scale_eeg_data(self.figure, df_data, self.cached_segments, global_sigma=self.global_sigma)
     
     def on_time_changed(self):
         """Handle changes in time input fields."""
@@ -713,12 +689,6 @@ class PlottingWindow(QWidget):
         
         return filtered_data
     
-    def on_plot_style_changed(self):
-        """Handle plot style change."""
-        if hasattr(self, 'data_metadata') and self.data_metadata:
-            # Reload current time segment with new plot style
-            self.load_time_segment(self.current_start_time, self.current_duration)
-    
     def on_display_params_changed(self):
         """Handle display parameter changes (sigma multiplier, y-range multiplier)."""
         if hasattr(self, 'data_metadata') and self.data_metadata:
@@ -742,8 +712,3 @@ class PlottingWindow(QWidget):
         if hasattr(self, 'file_metadata') and self.file_metadata:
             self.load_time_segment(self.current_start_time, self.current_duration)
     
-    def on_filter_changed(self):
-        """Handle filter change."""
-        if hasattr(self, 'data_metadata') and self.data_metadata:
-            # Reload current time segment with new filter
-            self.load_time_segment(self.current_start_time, self.current_duration)

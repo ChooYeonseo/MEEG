@@ -76,10 +76,12 @@ class EEGMainWindow(QMainWindow):
         # Title
         title_label = QLabel("MEEG - Mouse EEG Analysis Tool")
         title_font = QFont()
-        title_font.setPointSize(18)
+        title_font.setPointSize(20)
         title_font.setBold(True)
         title_label.setFont(title_font)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Use inline stylesheet to prevent theme from overriding
+        title_label.setStyleSheet("font-size: 20pt; font-weight: bold;")
         main_layout.addWidget(title_label)
         
         # Control panel
@@ -105,7 +107,7 @@ class EEGMainWindow(QMainWindow):
         self.visualize_button.setEnabled(False)
         button_layout.addWidget(self.visualize_button)
         
-        self.electrode_plot_button = QPushButton("Electrode Plotting")
+        self.electrode_plot_button = QPushButton("Electrode Configuration")
         self.electrode_plot_button.setMinimumHeight(40)
         self.electrode_plot_button.clicked.connect(self.open_electrode_plotting_window)
         button_layout.addWidget(self.electrode_plot_button)
@@ -322,6 +324,9 @@ class EEGMainWindow(QMainWindow):
         self.load_cached_button.setStyleSheet(THEME_STYLES['button_primary'])
         self.visualize_button.setStyleSheet(THEME_STYLES['button_primary'])
         
+        # Update electrode button style based on whether electrodes are loaded
+        self.update_electrode_button_style()
+        
     def select_and_read_data(self):
         """Select directory and start data reading process."""
         if self.reader_thread and self.reader_thread.isRunning():
@@ -339,9 +344,11 @@ class EEGMainWindow(QMainWindow):
         dialog_layout = QVBoxLayout(file_type_dialog)
         
         # Question label
-        question_label = QLabel("Select the data type.")
+        question_label = QLabel("Select the EEG data type.")
+        question_label2 = QLabel("(🚧We are continuing to add more formats in future updates.)")
         dialog_layout.addWidget(question_label)
-        
+        dialog_layout.addWidget(question_label2)
+
         # Add spacing
         dialog_layout.addSpacing(20)
         
@@ -358,18 +365,6 @@ class EEGMainWindow(QMainWindow):
         file_buttons_layout.addWidget(csv_button)
         dialog_layout.addLayout(file_buttons_layout)
         
-        # Add spacing between rows
-        dialog_layout.addSpacing(10)
-        
-        # Cancel button (separate line, aligned right)
-        cancel_layout = QHBoxLayout()
-        cancel_layout.addStretch()
-        cancel_button = QPushButton("Cancel")
-        cancel_button.setMinimumHeight(40)
-        cancel_button.setMinimumWidth(120)
-        cancel_layout.addWidget(cancel_button)
-        dialog_layout.addLayout(cancel_layout)
-        
         # Store the selected file type
         selected_file_type = [None]  # Use list to allow modification in nested function
         
@@ -381,13 +376,9 @@ class EEGMainWindow(QMainWindow):
             selected_file_type[0] = 'csv'
             file_type_dialog.accept()
         
-        def on_cancel_clicked():
-            file_type_dialog.reject()
-        
         # Connect buttons
         rhd_button.clicked.connect(on_rhd_clicked)
         csv_button.clicked.connect(on_csv_clicked)
-        cancel_button.clicked.connect(on_cancel_clicked)
         
         # Execute dialog
         if file_type_dialog.exec() != QDialog.DialogCode.Accepted:
@@ -609,6 +600,13 @@ class EEGMainWindow(QMainWindow):
         self.load_cached_button.setEnabled(True)
         self.progress_bar.setVisible(False)
         
+        # Clean up the thread properly
+        if self.reader_thread:
+            self.reader_thread.quit()
+            self.reader_thread.wait()
+            self.reader_thread.deleteLater()
+            self.reader_thread = None
+        
     def append_to_terminal(self, text):
         """Append text to the terminal window."""
         self.terminal_text.append(text)
@@ -720,11 +718,17 @@ class EEGMainWindow(QMainWindow):
             
             if reply == QMessageBox.StandardButton.Yes:
                 self.reader_thread.terminate()
-                self.reader_thread.wait()
+                self.reader_thread.wait(2000)  # Wait up to 2 seconds
                 event.accept()
             else:
                 event.ignore()
         else:
+            # Clean up any finished threads
+            if self.reader_thread:
+                if self.reader_thread.isFinished():
+                    self.reader_thread.wait()
+                    self.reader_thread.deleteLater()
+                    self.reader_thread = None
             event.accept()
             
     def open_plotting_window(self):
@@ -769,6 +773,27 @@ class EEGMainWindow(QMainWindow):
         """Set electrode positions and update button state."""
         self.electrode_positions = positions
         self.update_meeg_analysis_button_state()
+        # Update electrode button style to show it's activated
+        self.update_electrode_button_style()
+    
+    def update_electrode_button_style(self):
+        """Update the electrode configuration button style based on whether electrodes are loaded."""
+        # Get current theme
+        current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
+        
+        # Import appropriate theme styles
+        if current_theme == 'tokyo_night':
+            from theme import TOKYO_NIGHT_STYLES as THEME_STYLES
+        elif current_theme == 'dark':
+            from theme import DARK_THEME_STYLES as THEME_STYLES
+        else:  # normal
+            from theme import NORMAL_THEME_STYLES as THEME_STYLES
+        
+        # Apply primary button style if electrodes are loaded, otherwise secondary style
+        if self.electrode_positions:
+            self.electrode_plot_button.setStyleSheet(THEME_STYLES['button_primary'])
+        else:
+            self.electrode_plot_button.setStyleSheet(THEME_STYLES['button_secondary'])
     
     def open_meeg_analysis_window(self):
         """Open the MEEG analysis window for electrode mapping."""

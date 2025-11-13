@@ -13,12 +13,14 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
                             QWidget, QFormLayout, QCheckBox, QMessageBox,
                             QProgressBar, QTextEdit)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor, QBrush
 
 # Add utils directory to Python path
 current_dir = Path(__file__).parent.parent
 utils_dir = current_dir / "utils"
+theme_dir = current_dir / "theme"
 sys.path.insert(0, str(utils_dir))
+sys.path.insert(0, str(theme_dir))
 
 try:
     import signal_preprocessing
@@ -28,6 +30,7 @@ try:
         finalize_processed_data, 
         convert_rhd_result_to_dataframe
     )
+    from theme.preferences import preferences_manager
 except ImportError as e:
     print(f"Error importing preprocessing utilities: {e}")
 
@@ -139,6 +142,14 @@ class PreprocessingPipelineDialog(QDialog):
         self.processed_data = None
         self.setup_ui()
         self.setup_available_methods()
+        self.apply_theme()
+    
+    def apply_theme(self):
+        """Apply the current theme to this dialog."""
+        # Theme is already applied globally to the application
+        # We don't need to set it again on this dialog
+        # Individual widgets like list widgets have their own stylesheets set
+        pass
     
     def setup_ui(self):
         """Set up the user interface."""
@@ -175,6 +186,47 @@ class PreprocessingPipelineDialog(QDialog):
         # Available methods list
         self.available_methods = QListWidget()
         self.available_methods.setMaximumHeight(300)
+        
+        # Set list widget stylesheet that doesn't override item colors
+        # This allows setForeground() to work on individual items
+        current_theme = preferences_manager.get_theme()
+        if current_theme == "tokyo_night":
+            from theme.tokyo_night_theme import TOKYO_NIGHT_COLORS
+            list_bg = TOKYO_NIGHT_COLORS['bg_secondary']
+            list_border = TOKYO_NIGHT_COLORS['border']
+            list_selection = TOKYO_NIGHT_COLORS['selection']
+            list_text = TOKYO_NIGHT_COLORS['fg_primary']
+        elif current_theme == "dark":
+            from theme.dark_theme import DARK_COLORS
+            list_bg = DARK_COLORS['bg_secondary']
+            list_border = DARK_COLORS['border']
+            list_selection = DARK_COLORS['accent_primary']
+            list_text = DARK_COLORS['fg_primary']
+        else:
+            from theme.normal_theme import NORMAL_COLORS
+            list_bg = NORMAL_COLORS['bg_secondary']
+            list_border = NORMAL_COLORS['border']
+            list_selection = NORMAL_COLORS['accent_primary']
+            list_text = NORMAL_COLORS['fg_primary']
+        
+        # Stylesheet with default text color that can be overridden by setForeground
+        self.available_methods.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {list_bg};
+                color: {list_text};
+                border: 1px solid {list_border};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QListWidget::item {{
+                padding: 4px;
+                border-radius: 2px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {list_selection};
+            }}
+        """)
+        
         layout.addWidget(self.available_methods)
         
         # Method description and details
@@ -223,6 +275,46 @@ class PreprocessingPipelineDialog(QDialog):
         
         self.pipeline_list = QListWidget()
         self.pipeline_list.setMinimumHeight(200)
+        
+        # Set pipeline list widget stylesheet to match theme
+        current_theme = preferences_manager.get_theme()
+        if current_theme == "tokyo_night":
+            from theme.tokyo_night_theme import TOKYO_NIGHT_COLORS
+            pipeline_bg = TOKYO_NIGHT_COLORS['bg_secondary']
+            pipeline_border = TOKYO_NIGHT_COLORS['border']
+            pipeline_selection = TOKYO_NIGHT_COLORS['selection']
+            pipeline_text = TOKYO_NIGHT_COLORS['fg_primary']
+        elif current_theme == "dark":
+            from theme.dark_theme import DARK_COLORS
+            pipeline_bg = DARK_COLORS['bg_secondary']
+            pipeline_border = DARK_COLORS['border']
+            pipeline_selection = DARK_COLORS['accent_primary']
+            pipeline_text = DARK_COLORS['fg_primary']
+        else:
+            from theme.normal_theme import NORMAL_COLORS
+            pipeline_bg = NORMAL_COLORS['bg_secondary']
+            pipeline_border = NORMAL_COLORS['border']
+            pipeline_selection = NORMAL_COLORS['accent_primary']
+            pipeline_text = NORMAL_COLORS['fg_primary']
+        
+        # Apply stylesheet with proper text color
+        self.pipeline_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {pipeline_bg};
+                color: {pipeline_text};
+                border: 1px solid {pipeline_border};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QListWidget::item {{
+                padding: 4px;
+                border-radius: 2px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {pipeline_selection};
+            }}
+        """)
+        
         pipeline_layout.addWidget(self.pipeline_list)
         
         # Pipeline controls
@@ -304,12 +396,29 @@ class PreprocessingPipelineDialog(QDialog):
             for category, methods in sorted(categories.items()):
                 # Add category header
                 if len(categories) > 1:
+                    # Get theme-specific color for category headers
+                    current_theme = preferences_manager.get_theme()
+                    if current_theme == "tokyo_night":
+                        from theme.tokyo_night_theme import TOKYO_NIGHT_COLORS
+                        category_color = TOKYO_NIGHT_COLORS['accent_cyan']
+                    elif current_theme == "dark":
+                        from theme.dark_theme import DARK_COLORS
+                        category_color = DARK_COLORS['fg_primary']
+                    else:
+                        from theme.normal_theme import NORMAL_COLORS
+                        category_color = NORMAL_COLORS['accent_primary']
+                    
                     category_item = QListWidgetItem(f"--- {category} ---")
                     category_item.setFlags(Qt.ItemFlag.NoItemFlags)  # Make it unselectable
                     category_item.setData(Qt.ItemDataRole.UserRole, None)
                     font = category_item.font()
                     font.setBold(True)
                     category_item.setFont(font)
+                    
+                    # Set category header color using QBrush for better compatibility
+                    from PyQt6.QtGui import QBrush
+                    category_item.setForeground(QBrush(QColor(category_color)))
+                    
                     self.available_methods.addItem(category_item)
                 
                 # Add methods in this category
@@ -641,6 +750,13 @@ class ParameterConfigDialog(QDialog):
         self.method_def = method_def
         self.parameter_widgets = {}
         self.setup_ui()
+        self.apply_theme()
+    
+    def apply_theme(self):
+        """Apply the current theme to this dialog."""
+        # Theme is already applied globally to the application
+        # We don't need to set it again on this dialog
+        pass
     
     def setup_ui(self):
         """Set up the parameter configuration UI."""

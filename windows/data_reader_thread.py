@@ -6,6 +6,7 @@ EEG data in a separate thread to prevent GUI freezing.
 """
 
 import sys
+import time
 import traceback
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -117,6 +118,7 @@ class DataReaderThread(QThread):
     
     def read_csv_files(self, csv_file_paths, sampling_rate):
         """Read CSV files from a list of file paths.
+        Uses memory-efficient chunked reading and numpy arrays to prevent crashes.
         
         Args:
             csv_file_paths: List of absolute paths to CSV files
@@ -140,31 +142,90 @@ class DataReaderThread(QThread):
             try:
                 print(f"Reading: {csv_file.name}...")
                 
-                # Read CSV file
-                df = pd.read_csv(csv_file)
+                # Read CSV file in chunks to avoid memory issues
+                # First, get the column names and number of rows
+                first_chunk = pd.read_csv(csv_file, nrows=1)
+                channel_names = first_chunk.columns.tolist()
+                n_channels = len(channel_names)
                 
-                # Convert to format similar to RHD data structure
-                # Assuming CSV has columns as channels and rows as time points
-                amplifier_data = df.values.T  # Transpose so channels are rows
+                print(f"  Found {n_channels} channels: {channel_names}")
+                self.progress_update.emit(f"Found {n_channels} channels in {csv_file.name}")
+                
+                # Count total rows efficiently
+                self.progress_update.emit(f"Counting samples in {csv_file.name}...")
+                with open(csv_file, 'r') as f:
+                    n_samples = sum(1 for _ in f) - 1  # -1 for header
+                
+                print(f"  Total samples: {n_samples:,}")
+                self.progress_update.emit(f"Loading {n_samples:,} samples from {csv_file.name}...")
+                
+                # Pre-allocate numpy array for efficiency (float32 for memory optimization)
+                amplifier_data = np.empty((n_channels, n_samples), dtype=np.float32)
+                
+                # Read CSV in chunks and populate the numpy array
+                chunk_size = 50000  # Read 50k rows at a time
+                row_offset = 0
+                
+                print(f"  Reading in chunks...")
+                for chunk in pd.read_csv(csv_file, chunksize=chunk_size, dtype=np.float32):
+                    chunk_rows = len(chunk)
+                    
+                    # Round to 4 decimal places to reduce memory and computation load
+                    # This is sufficient for EEG data and prevents numerical precision issues
+                    chunk_data = np.round(chunk.values.T, decimals=4).astype(np.float32)
+                    
+                    # Place in pre-allocated array
+                    amplifier_data[:, row_offset:row_offset + chunk_rows] = chunk_data
+                    row_offset += chunk_rows
+                    
+                    # Emit progress signal to keep GUI responsive
+                    progress_pct = (row_offset / n_samples) * 100
+                    self.progress_update.emit(f"Loading {csv_file.name}: {progress_pct:.1f}% ({row_offset:,}/{n_samples:,} samples)")
+                    
+                    # Small sleep to allow PyQt6 event loop to process signals
+                    # This prevents the GUI from freezing and PyQt6 from aborting
+                    time.sleep(0.001)
+                    
+                    # Show progress in console less frequently
+                    if row_offset % (chunk_size * 5) == 0:
+                        print(f"    Progress: {row_offset:,}/{n_samples:,} samples ({progress_pct:.1f}%)")
+                
+                print(f"  ✓ Successfully loaded into numpy array")
+                
+                # Create channel info similar to RHD format
+                amplifier_channels = [
+                    {'native_channel_name': name, 'custom_channel_name': name}
+                    for name in channel_names
+                ]
+                
+                # Create time vector
+                t_amplifier = np.arange(n_samples, dtype=np.float32) / sampling_rate
                 
                 # Create a result structure similar to RHD format
                 result = {
                     'amplifier_data': amplifier_data,
+                    'amplifier_channels': amplifier_channels,
+                    't_amplifier': t_amplifier,
                     'frequency_parameters': {
-                        'amplifier_sample_rate': sampling_rate  # Use provided sampling rate
+                        'amplifier_sample_rate': sampling_rate
                     },
                     'notes': {
                         'note1': f'Loaded from CSV: {csv_file.name}',
                         'note2': f'Sampling rate: {sampling_rate} Hz'
-                    }
+                    },
+                    'data_format': 'csv'  # Mark as CSV-originated
                 }
                 
                 results.append((csv_file.name, result, True))
-                duration = amplifier_data.shape[1] / sampling_rate
-                print(f"  Loaded {amplifier_data.shape[0]} channels, {amplifier_data.shape[1]} samples ({duration:.2f}s)")
+                duration = n_samples / sampling_rate
+                memory_mb = amplifier_data.nbytes / (1024**2)
+                print(f"  ✓ Loaded {n_channels} channels, {n_samples:,} samples ({duration:.2f}s)")
+                print(f"  Memory usage: {memory_mb:.2f} MB")
                 
             except Exception as e:
-                print(f"  Error reading {csv_file.name}: {str(e)}")
+                print(f"  ✗ Error reading {csv_file.name}: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 results.append((csv_file.name, None, False))
         
         return results

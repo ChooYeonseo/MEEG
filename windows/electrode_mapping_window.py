@@ -7,6 +7,7 @@ map electrodes to data channels and save the mapping to cache metadata.
 
 import json
 import hashlib
+import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                             QLabel, QGroupBox, QTableWidget, QTableWidgetItem,
@@ -19,6 +20,11 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.patches as patches
+
+# Import theme system
+current_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(current_dir))
+from theme import preferences_manager
 
 
 class ElectrodeVisualizationWidget(QWidget):
@@ -337,6 +343,9 @@ class ElectrodeMappingWindow(QWidget):
         self.channel_mapping = {}  # Dictionary mapping electrode number to channel name
         self.mosaic_relationships = []  # List of relationship dicts with names and electrode pairs
         
+        # Get current theme
+        self.current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
+        
         # Extract available channels from data
         self.available_channels = self.extract_channels_from_data()
         
@@ -344,6 +353,7 @@ class ElectrodeMappingWindow(QWidget):
         self.load_existing_mapping()
         # Update initial visualization
         self.update_electrode_visualization()
+        self.apply_theme()
         
     def extract_channels_from_data(self):
         """Extract available channel names from loaded data."""
@@ -521,13 +531,53 @@ class ElectrodeMappingWindow(QWidget):
         footer_layout = QHBoxLayout()
         footer_layout.addStretch()
         
-        label_button = QPushButton("🏷️ Label Data")
+        label_button = QPushButton("Data Preview")
         label_button.clicked.connect(self.open_labeling_window)
         label_button.setMinimumHeight(40)
         label_button.setMinimumWidth(120)
         footer_layout.addWidget(label_button)
         
         main_layout.addLayout(footer_layout)
+    
+    def apply_theme(self):
+        """Apply the current theme to the window."""
+        # Import appropriate theme
+        if self.current_theme == 'tokyo_night':
+            from theme import TOKYO_NIGHT_STYLES as THEME_STYLES, TOKYO_NIGHT_COLORS as THEME_COLORS
+        elif self.current_theme == 'dark':
+            from theme import DARK_THEME_STYLES as THEME_STYLES, DARK_COLORS as THEME_COLORS
+        else:  # normal
+            from theme import NORMAL_THEME_STYLES as THEME_STYLES, NORMAL_COLORS as THEME_COLORS
+        
+        # Apply window background
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {THEME_COLORS['bg_primary']};
+                color: {THEME_COLORS['fg_primary']};
+            }}
+            {THEME_STYLES.get('form_layout', '')}
+        """)
+        
+        # Apply group box styles
+        for widget in self.findChildren(QGroupBox):
+            widget.setStyleSheet(THEME_STYLES['group_box'])
+        
+        # Apply label styles to ensure consistent backgrounds
+        for widget in self.findChildren(QLabel):
+            if not widget.styleSheet():  # Only if no custom style is set
+                widget.setStyleSheet(THEME_STYLES.get('label', ''))
+        
+        # Apply button styles
+        for widget in self.findChildren(QPushButton):
+            widget.setStyleSheet(THEME_STYLES['button_primary'])
+        
+        # Apply table styles
+        for widget in self.findChildren(QTableWidget):
+            widget.setStyleSheet(THEME_STYLES.get('table', ''))
+        
+        # Apply text edit styles
+        for widget in self.findChildren(QTextEdit):
+            widget.setStyleSheet(THEME_STYLES.get('text_edit', ''))
         
     def update_electrode_info_display(self):
         """Update the electrode information display."""
@@ -907,19 +957,21 @@ class ElectrodeMappingWindow(QWidget):
             QMessageBox.critical(self, "Error", f"Error saving mapping: {str(e)}")
     
     def open_labeling_window(self):
-        """Open the labeling window for mosaic data analysis."""
-        if not self.mosaic_relationships:
-            QMessageBox.warning(self, "No Mosaic Relationships", 
-                              "Please create mosaic relationships first before opening the labeling window.")
+        """Open the labeling window for data analysis (mosaic or single electrode mode)."""
+        # Check if we have electrode positions (required for either mode)
+        if not self.electrode_positions:
+            QMessageBox.warning(self, "No Electrode Positions", 
+                              "Please configure electrode positions first before opening the labeling window.")
             return
             
         if not self.current_data:
             QMessageBox.warning(self, "No Data", "No data available for analysis.")
             return
             
-        # Create and show the labeling window
+        # Create and show the integrated data view window
+        # If no mosaic relationships exist, it will operate in single electrode mode
         try:
-            from .labeling_window import LabelingWindow
+            from .integrated_data_view import LabelingWindow
             self.labeling_window = LabelingWindow(
                 mosaic_relationships=self.mosaic_relationships,
                 electrode_positions=self.electrode_positions,
@@ -931,8 +983,8 @@ class ElectrodeMappingWindow(QWidget):
             self.labeling_window.raise_()  # Bring to front
             self.labeling_window.activateWindow()  # Activate the window
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error opening labeling window: {str(e)}")
-            print(f"Error opening labeling window: {e}")
+            QMessageBox.critical(self, "Error", f"Error opening integrated data view window: {str(e)}")
+            print(f"Error opening integrated data view window: {e}")
     
     def export_configuration(self):
         """Export the complete mosaic configuration to a JSON file."""

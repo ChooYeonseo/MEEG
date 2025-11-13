@@ -7,6 +7,7 @@ visually place electrodes on a mouse head image and specify coordinates.
 
 import os
 import json
+import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                             QLabel, QLineEdit, QGroupBox, QSpinBox, QFormLayout,
@@ -18,6 +19,11 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.patches as patches
+
+# Import theme system
+current_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(current_dir))
+from theme import preferences_manager
 
 
 class ClickableImageWidget(QWidget):
@@ -158,7 +164,11 @@ class ElectrodePlottingWindow(QWidget):
         self.main_window = main_window  # Reference to main window
         self.electrodes_data = []  # List of electrode data dictionaries
         
+        # Get current theme
+        self.current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
+        
         self.init_ui()
+        self.apply_theme()
         
     def init_ui(self):
         """Initialize the user interface."""
@@ -236,6 +246,9 @@ class ElectrodePlottingWindow(QWidget):
         self.electrodes_table.setColumnCount(3)
         self.electrodes_table.setHorizontalHeaderLabels(["Electrode #", "ML", "AP"])
         
+        # Connect cell change signal to update plot
+        self.electrodes_table.cellChanged.connect(self.on_table_cell_changed)
+        
         # Make table columns stretch to fill available space
         header = self.electrodes_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -276,6 +289,48 @@ class ElectrodePlottingWindow(QWidget):
         main_layout.addWidget(splitter)
         
         self.update_electrode_count()
+    
+    def apply_theme(self):
+        """Apply the current theme to the window."""
+        # Import appropriate theme
+        if self.current_theme == 'tokyo_night':
+            from theme import TOKYO_NIGHT_STYLES as THEME_STYLES, TOKYO_NIGHT_COLORS as THEME_COLORS
+        elif self.current_theme == 'dark':
+            from theme import DARK_THEME_STYLES as THEME_STYLES, DARK_COLORS as THEME_COLORS
+        else:  # normal
+            from theme import NORMAL_THEME_STYLES as THEME_STYLES, NORMAL_COLORS as THEME_COLORS
+        
+        # Store theme styles and colors for later use
+        self.theme_styles = THEME_STYLES
+        self.theme_colors = THEME_COLORS
+        
+        # Apply window background
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {THEME_COLORS['bg_primary']};
+                color: {THEME_COLORS['fg_primary']};
+            }}
+            {THEME_STYLES.get('form_layout', '')}
+        """)
+        
+        # Apply group box styles
+        for widget in self.findChildren(QGroupBox):
+            widget.setStyleSheet(THEME_STYLES['group_box'])
+        
+        # Apply label styles to ensure consistent backgrounds
+        for widget in self.findChildren(QLabel):
+            if not widget.styleSheet():  # Only if no custom style is set
+                widget.setStyleSheet(THEME_STYLES.get('label', ''))
+        
+        # Apply button styles
+        for widget in self.findChildren(QPushButton):
+            # Check if button has custom style (like saved/loaded state)
+            if not widget.styleSheet() or 'background-color: #' not in widget.styleSheet():
+                widget.setStyleSheet(THEME_STYLES['button_primary'])
+        
+        # Apply table styles
+        if hasattr(self, 'electrodes_table'):
+            self.electrodes_table.setStyleSheet(THEME_STYLES.get('table', ''))
     
     def on_electrode_placed(self, x, y):
         """Handle electrode placement from image click."""
@@ -324,9 +379,12 @@ class ElectrodePlottingWindow(QWidget):
     
     def reset_button_styles(self):
         """Reset the file operation buttons to their default appearance."""
-        self.load_button.setStyleSheet("")  # Reset to default style
+        # Apply theme button style
+        if hasattr(self, 'theme_styles'):
+            button_style = self.theme_styles.get('button_primary', '')
+            self.load_button.setStyleSheet(button_style)
+            self.save_button.setStyleSheet(button_style)
         self.load_button.setText("📁 Load Electrodes")
-        self.save_button.setStyleSheet("")  # Reset to default style
         self.save_button.setText("💾 Save Electrodes")
     
     def clear_all_electrodes(self):
@@ -380,12 +438,73 @@ class ElectrodePlottingWindow(QWidget):
     
     def update_electrodes_table(self):
         """Update the electrodes table with current data."""
+        # Temporarily disconnect signal to prevent recursive updates
+        self.electrodes_table.cellChanged.disconnect(self.on_table_cell_changed)
+        
         self.electrodes_table.setRowCount(len(self.electrodes_data))
         
         for i, electrode in enumerate(self.electrodes_data):
-            self.electrodes_table.setItem(i, 0, QTableWidgetItem(str(electrode['number'])))
+            # Electrode number (read-only)
+            number_item = QTableWidgetItem(str(electrode['number']))
+            number_item.setFlags(number_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.electrodes_table.setItem(i, 0, number_item)
+            
+            # X and Y coordinates (editable)
             self.electrodes_table.setItem(i, 1, QTableWidgetItem(str(electrode['x'])))
             self.electrodes_table.setItem(i, 2, QTableWidgetItem(str(electrode['y'])))
+        
+        # Reconnect signal
+        self.electrodes_table.cellChanged.connect(self.on_table_cell_changed)
+    
+    def on_table_cell_changed(self, row, column):
+        """Handle changes to table cells and update the plot."""
+        # Only process changes to X (column 1) or Y (column 2) coordinates
+        if column not in [1, 2]:
+            return
+        
+        try:
+            # Get the new value
+            item = self.electrodes_table.item(row, column)
+            if item is None:
+                return
+            
+            new_value = float(item.text())
+            
+            # Validate coordinate ranges
+            if column == 1:  # X coordinate (ML)
+                if not (-5 <= new_value <= 5):
+                    QMessageBox.warning(self, "Invalid Coordinate", "ML coordinate must be between -5 and 5")
+                    # Restore old value
+                    item.setText(str(self.electrodes_data[row]['x']))
+                    return
+                self.electrodes_data[row]['x'] = round(new_value, 3)
+            else:  # column == 2, Y coordinate (AP)
+                if not (-8 <= new_value <= 5):
+                    QMessageBox.warning(self, "Invalid Coordinate", "AP coordinate must be between -8 and 5")
+                    # Restore old value
+                    item.setText(str(self.electrodes_data[row]['y']))
+                    return
+                self.electrodes_data[row]['y'] = round(new_value, 3)
+            
+            # Update the item with rounded value
+            item.setText(str(round(new_value, 3)))
+            
+            # Rebuild the plot with updated coordinates
+            self.rebuild_image_electrodes()
+            
+            # Reset button styles since electrodes have been modified
+            self.reset_button_styles()
+            
+            # Emit signal with updated positions
+            self.positions_updated.emit(self.electrodes_data.copy())
+            
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter a valid numeric value")
+            # Restore old value
+            if column == 1:
+                item.setText(str(self.electrodes_data[row]['x']))
+            else:
+                item.setText(str(self.electrodes_data[row]['y']))
     
     def update_electrode_count(self):
         """Update the electrode count label."""
@@ -406,9 +525,10 @@ class ElectrodePlottingWindow(QWidget):
                 with open(file_path, 'w') as f:
                     json.dump(self.electrodes_data, f, indent=2)
                 
-                # Change button color to indicate successful saving
+                # Change button style to indicate successful saving using theme colors
+                success_color = self.theme_colors.get('accent_blue', '#2196F3')
                 self.save_button.setStyleSheet(
-                    "QPushButton { background-color: #2196F3; color: white; font-weight: bold; }"
+                    f"QPushButton {{ background-color: {success_color}; color: white; font-weight: bold; }}"
                 )
                 self.save_button.setText("✅ Saved")
                 
@@ -441,9 +561,10 @@ class ElectrodePlottingWindow(QWidget):
                         self.image_widget.add_electrode(x, y)
                         self.add_electrode_to_data(x, y)
                 
-                # Change button color to indicate successful loading
+                # Change button style to indicate successful loading using theme colors
+                success_color = self.theme_colors.get('accent_green', '#4CAF50')
                 self.load_button.setStyleSheet(
-                    "QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }"
+                    f"QPushButton {{ background-color: {success_color}; color: white; font-weight: bold; }}"
                 )
                 self.load_button.setText("✅ Electrodes Loaded")
                 
