@@ -4,6 +4,16 @@ Dark mode theme configuration for EEG Analysis GUI.
 This module contains a dark black color scheme with white text for high contrast.
 """
 
+# Font configuration (unified across all themes)
+DARK_FONTS = {
+    'family': 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
+    'mono_family': '"SF Mono", Monaco, "Cascadia Code", "Courier New", monospace',
+    'size_small': '10px',
+    'size_normal': '11px',
+    'size_medium': '12px',
+    'size_large': '14px',
+}
+
 # Dark mode color palette (dark blacks with white text)
 DARK_COLORS = {
     'bg_primary': '#1a1a1a',      # Very dark black background
@@ -42,7 +52,8 @@ DARK_THEME_STYLES = {
             border: 1px solid {DARK_COLORS['border']};
             border-radius: 8px;
             font-weight: bold;
-            font-size: 12px;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_large']};
             color: {DARK_COLORS['accent_highlight']};
             margin-top: 8px;
             padding-top: 10px;
@@ -64,7 +75,8 @@ DARK_THEME_STYLES = {
             padding: 10px 20px;
             border-radius: 6px;
             font-weight: bold;
-            font-size: 11px;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_medium']};
         }}
         
         QPushButton:hover {{
@@ -88,7 +100,9 @@ DARK_THEME_STYLES = {
             border: 1px solid {DARK_COLORS['border']};
             padding: 8px 16px;
             border-radius: 6px;
-            font-size: 11px;
+            font-weight: 500;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
         }}
         
         QPushButton:hover {{
@@ -108,6 +122,8 @@ DARK_THEME_STYLES = {
             border: 1px solid {DARK_COLORS['border']};
             border-radius: 6px;
             padding: 8px;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
             selection-background-color: {DARK_COLORS['accent_primary']};
         }}
         
@@ -123,8 +139,8 @@ DARK_THEME_STYLES = {
             border: 1px solid {DARK_COLORS['border']};
             border-radius: 6px;
             padding: 10px;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            font-size: 11px;
+            font-family: {DARK_FONTS['mono_family']};
+            font-size: {DARK_FONTS['size_normal']};
             selection-background-color: {DARK_COLORS['accent_primary']};
         }}
     """,
@@ -136,6 +152,8 @@ DARK_THEME_STYLES = {
             border: 1px solid {DARK_COLORS['border']};
             border-radius: 4px;
             padding: 6px 10px;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
             selection-background-color: {DARK_COLORS['accent_primary']};
         }}
         
@@ -151,6 +169,8 @@ DARK_THEME_STYLES = {
             border: 1px solid {DARK_COLORS['border']};
             border-radius: 4px;
             padding: 6px 10px;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
         }}
         
         QComboBox:hover {{
@@ -177,6 +197,8 @@ DARK_THEME_STYLES = {
             text-align: center;
             background-color: {DARK_COLORS['bg_secondary']};
             color: {DARK_COLORS['fg_primary']};
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_small']};
             font-weight: bold;
         }}
         
@@ -190,6 +212,8 @@ DARK_THEME_STYLES = {
         QLabel {{
             color: {DARK_COLORS['fg_primary']};
             background-color: transparent;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
         }}
     """,
     
@@ -198,6 +222,8 @@ DARK_THEME_STYLES = {
             background-color: {DARK_COLORS['bg_secondary']};
             color: {DARK_COLORS['fg_primary']};
             border-top: 1px solid {DARK_COLORS['border']};
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
         }}
         
         QStatusBar QLabel {{
@@ -210,6 +236,8 @@ DARK_THEME_STYLES = {
             background-color: {DARK_COLORS['bg_secondary']};
             color: {DARK_COLORS['fg_primary']};
             border-bottom: 1px solid {DARK_COLORS['border']};
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
         }}
         
         QMenuBar::item {{
@@ -231,6 +259,8 @@ DARK_THEME_STYLES = {
             background-color: {DARK_COLORS['bg_secondary']};
             color: {DARK_COLORS['fg_primary']};
             border: 1px solid {DARK_COLORS['border']};
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
         }}
         
         QMenu::item {{
@@ -302,6 +332,49 @@ DARK_THEME_STYLES = {
         QScrollBar::add-line, QScrollBar::sub-line {{
             background: none;
             border: none;
+        }}
+    """,
+    
+    'form_layout': f"""
+        QFormLayout QLabel {{
+            color: {DARK_COLORS['fg_primary']};
+            background: transparent;
+            font-weight: 500;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
+        }}
+    """,
+    
+    'message_box': f"""
+        QMessageBox {{
+            background-color: {DARK_COLORS['bg_primary']};
+            color: {DARK_COLORS['fg_primary']};
+        }}
+        
+        QMessageBox QLabel {{
+            color: {DARK_COLORS['fg_primary']};
+            background: transparent;
+            font-family: {DARK_FONTS['family']};
+            font-size: {DARK_FONTS['size_normal']};
+        }}
+        
+        QMessageBox QPushButton {{
+            background-color: {DARK_COLORS['accent_primary']};
+            color: {DARK_COLORS['fg_primary']};
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: {DARK_FONTS['size_normal']};
+            min-width: 80px;
+        }}
+        
+        QMessageBox QPushButton:hover {{
+            background-color: {DARK_COLORS['accent_hover']};
+        }}
+        
+        QMessageBox QPushButton:pressed {{
+            background-color: {DARK_COLORS['accent_pressed']};
         }}
     """,
 }

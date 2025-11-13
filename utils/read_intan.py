@@ -8,6 +8,7 @@ import sys
 import glob
 from pathlib import Path
 import pandas as pd
+from tqdm import tqdm
 import numpy as np
 from tqdm import tqdm
 
@@ -104,7 +105,7 @@ def read_rhd_directory(directory_path, file_pattern="*.rhd"):
     print(f"Found {len(rhd_files)} RHD files in {directory_path}")
     
     results = []
-    for file_path in sorted(rhd_files):
+    for file_path in tqdm(sorted(rhd_files), desc="Reading RHD files", unit="file"):
         try:
             result, data_present = read_rhd_file(file_path)
             filename = os.path.basename(file_path)

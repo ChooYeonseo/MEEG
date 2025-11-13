@@ -10,6 +10,52 @@ import pandas as pd
 from pathlib import Path
 
 
+def create_minimal_metadata(data_df, sampling_rate=None):
+    """
+    Create minimal metadata for CSV data that doesn't have full RHD metadata.
+    
+    Parameters:
+    -----------
+    data_df : pandas.DataFrame
+        DataFrame with 'time' column and channel columns
+    sampling_rate : float, optional
+        Sampling rate in Hz. If None, calculated from time column
+    
+    Returns:
+    --------
+    metadata : dict
+        Minimal metadata dictionary with sampling frequency, channel names, and sample length
+    """
+    # Get channel names (excluding 'time' column)
+    channel_columns = [col for col in data_df.columns if col != 'time']
+    
+    # Calculate sampling rate if not provided
+    if sampling_rate is None and 'time' in data_df.columns:
+        time_diff = np.diff(data_df['time'].values)
+        median_dt = np.median(time_diff)
+        sampling_rate = 1.0 / median_dt
+    
+    # Get total sample length
+    n_samples = len(data_df)
+    
+    # Create minimal metadata structure
+    metadata = {
+        'frequency_parameters': {
+            'amplifier_sample_rate': sampling_rate
+        },
+        'amplifier_channels': [
+            {'native_channel_name': ch, 'custom_channel_name': ch}
+            for ch in channel_columns
+        ],
+        'amplifier_data': None,  # Will be filled later
+        't_amplifier': data_df['time'].values if 'time' in data_df.columns else np.arange(n_samples) / sampling_rate,
+        'data_format': 'csv',  # Mark this as CSV-originated data
+        'n_samples': n_samples
+    }
+    
+    return metadata
+
+
 def convert_rhd_result_to_dataframe(result, sampling_rate=None):
     """
     Convert RHD result dictionary to pandas DataFrame format expected by preprocessing functions.
@@ -18,6 +64,7 @@ def convert_rhd_result_to_dataframe(result, sampling_rate=None):
     -----------
     result : dict
         Result dictionary from read_intan containing 'amplifier_data' and 'amplifier_channels'
+        OR a minimal metadata dict created from CSV data
     sampling_rate : float, optional
         Sampling rate in Hz. If None, extracted from result['frequency_parameters']
     
@@ -30,9 +77,24 @@ def convert_rhd_result_to_dataframe(result, sampling_rate=None):
         raise ValueError("Result dictionary must contain 'amplifier_data'")
     
     amplifier_data = result['amplifier_data']  # Shape: (n_channels, n_samples)
-    time_vector = np.array(result['t_amplifier'])  # Time vector in seconds
+    
+    # Handle time vector - use existing t_amplifier or create one
+    if 't_amplifier' in result and result['t_amplifier'] is not None:
+        time_vector = np.array(result['t_amplifier'])  # Time vector in seconds
+    else:
+        # Create time vector from sampling rate
+        if sampling_rate is None:
+            if 'frequency_parameters' in result:
+                sampling_rate = result['frequency_parameters'].get('amplifier_sample_rate')
+            
+            if sampling_rate is None:
+                raise ValueError("Sampling rate not found in result and not provided")
+        
+        n_samples = amplifier_data.shape[1] if amplifier_data.ndim > 1 else len(amplifier_data)
+        time_vector = np.arange(n_samples) / sampling_rate
 
-    assert len(time_vector) == amplifier_data.shape[1], "Time vector length must match number of samples"
+    if amplifier_data.ndim > 1:
+        assert len(time_vector) == amplifier_data.shape[1], "Time vector length must match number of samples"
     
     # Get sampling rate
     if sampling_rate is None:
@@ -49,9 +111,6 @@ def convert_rhd_result_to_dataframe(result, sampling_rate=None):
         amplifier_data = amplifier_data.reshape(1, -1)
     else:
         n_channels, n_samples = amplifier_data.shape
-    
-    # Create time vector
-    # time_vector = np.arange(n_samples) / sampling_rate
     
     # Create DataFrame
     data_dict = {'time': time_vector}
@@ -74,6 +133,7 @@ def convert_rhd_result_to_dataframe(result, sampling_rate=None):
 def convert_dataframe_to_rhd_result(data_df, original_result, sampling_rate=None):
     """
     Convert processed DataFrame back to RHD result format for caching.
+    Handles both RHD-originated and CSV-originated data.
     
     Parameters:
     -----------
@@ -101,11 +161,33 @@ def convert_dataframe_to_rhd_result(data_df, original_result, sampling_rate=None
     # Update the amplifier_data in the result
     updated_result['amplifier_data'] = amplifier_data
     
-    # Update sampling rate if provided
+    # Update time vector
+    if 'time' in data_df.columns:
+        updated_result['t_amplifier'] = data_df['time'].values
+    
+    # Update sampling rate if provided or calculate from time
     if sampling_rate is not None:
         if 'frequency_parameters' not in updated_result:
             updated_result['frequency_parameters'] = {}
         updated_result['frequency_parameters']['amplifier_sample_rate'] = sampling_rate
+    elif 'time' in data_df.columns and len(data_df) > 1:
+        # Recalculate sampling rate from time column
+        time_diff = np.diff(data_df['time'].values)
+        median_dt = np.median(time_diff)
+        calculated_rate = 1.0 / median_dt
+        if 'frequency_parameters' not in updated_result:
+            updated_result['frequency_parameters'] = {}
+        updated_result['frequency_parameters']['amplifier_sample_rate'] = calculated_rate
+    
+    # Update channel information if needed
+    if 'amplifier_channels' not in updated_result or len(updated_result['amplifier_channels']) != len(channel_columns):
+        updated_result['amplifier_channels'] = [
+            {'native_channel_name': ch, 'custom_channel_name': ch}
+            for ch in channel_columns
+        ]
+    
+    # Update sample count
+    updated_result['n_samples'] = len(data_df)
     
     # Add preprocessing metadata
     if 'preprocessing_applied' not in updated_result:
@@ -119,6 +201,7 @@ def prepare_data_for_preprocessing(data_list):
     """
     Prepare a list of (filename, result, data_present) tuples for preprocessing.
     Converts each result to DataFrame format.
+    Handles both RHD data and CSV data by creating minimal metadata for CSV.
     
     Parameters:
     -----------
@@ -138,12 +221,32 @@ def prepare_data_for_preprocessing(data_list):
             continue
         
         try:
-            # Convert to DataFrame format
-            data_df = convert_rhd_result_to_dataframe(result)
-            prepared_data.append((filename, data_df, data_present, result))
+            # Check if this is CSV data (DataFrame) or RHD data (dict)
+            if isinstance(result, pd.DataFrame):
+                # CSV data - create minimal metadata
+                print(f"Processing CSV data: {filename}")
+                
+                # Create minimal metadata from DataFrame
+                metadata = create_minimal_metadata(result)
+                
+                # Convert DataFrame columns to amplifier_data format
+                channel_columns = [col for col in result.columns if col != 'time']
+                amplifier_data = np.array([result[col].values for col in channel_columns])
+                metadata['amplifier_data'] = amplifier_data
+                
+                # Use the DataFrame directly for preprocessing
+                data_df = result
+                prepared_data.append((filename, data_df, data_present, metadata))
+                
+            else:
+                # RHD data - use existing conversion
+                data_df = convert_rhd_result_to_dataframe(result)
+                prepared_data.append((filename, data_df, data_present, result))
             
         except Exception as e:
             print(f"Warning: Could not convert {filename} to DataFrame: {e}")
+            import traceback
+            traceback.print_exc()
             prepared_data.append((filename, None, False, result))
     
     return prepared_data

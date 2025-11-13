@@ -5,6 +5,16 @@ This module contains the Tokyo Night color scheme and styling configurations
 for the entire application.
 """
 
+# Font configuration (unified across all themes)
+TOKYO_NIGHT_FONTS = {
+    'family': 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
+    'mono_family': '"SF Mono", Monaco, "Cascadia Code", "Courier New", monospace',
+    'size_small': '10px',
+    'size_normal': '11px',
+    'size_medium': '12px',
+    'size_large': '14px',
+}
+
 # Tokyo Night Color Palette
 TOKYO_NIGHT_COLORS = {
     # Background colors
@@ -59,7 +69,8 @@ TOKYO_NIGHT_STYLES = {
             border: 1px solid {TOKYO_NIGHT_COLORS['border']};
             border-radius: 8px;
             font-weight: bold;
-            font-size: 12px;
+            font-size: {TOKYO_NIGHT_FONTS['size_large']};
+            font-family: {TOKYO_NIGHT_FONTS['family']};
             color: {TOKYO_NIGHT_COLORS['accent_blue']};
             margin-top: 8px;
             padding-top: 10px;
@@ -81,7 +92,8 @@ TOKYO_NIGHT_STYLES = {
             padding: 10px 20px;
             border-radius: 6px;
             font-weight: bold;
-            font-size: 12px;
+            font-size: {TOKYO_NIGHT_FONTS['size_medium']};
+            font-family: {TOKYO_NIGHT_FONTS['family']};
         }}
         
         QPushButton:hover {{
@@ -106,7 +118,8 @@ TOKYO_NIGHT_STYLES = {
             padding: 8px 16px;
             border-radius: 6px;
             font-weight: 500;
-            font-size: 11px;
+            font-size: {TOKYO_NIGHT_FONTS['size_normal']};
+            font-family: {TOKYO_NIGHT_FONTS['family']};
         }}
         
         QPushButton:hover {{
@@ -132,8 +145,8 @@ TOKYO_NIGHT_STYLES = {
             border: 1px solid {TOKYO_NIGHT_COLORS['border']};
             border-radius: 6px;
             padding: 8px;
-            font-family: 'Courier New', 'Courier', 'Monaco';
-            font-size: 11px;
+            font-family: {TOKYO_NIGHT_FONTS['family']};
+            font-size: {TOKYO_NIGHT_FONTS['size_normal']};
             selection-background-color: {TOKYO_NIGHT_COLORS['selection']};
         }}
         
@@ -170,8 +183,8 @@ TOKYO_NIGHT_STYLES = {
             border: 1px solid {TOKYO_NIGHT_COLORS['border']};
             border-radius: 6px;
             padding: 12px;
-            font-family: 'Courier New', 'Courier', 'Monaco';
-            font-size: 12px;
+            font-family: {TOKYO_NIGHT_FONTS['mono_family']};
+            font-size: {TOKYO_NIGHT_FONTS['size_medium']};
             selection-background-color: {TOKYO_NIGHT_COLORS['selection']};
         }}
     """,
@@ -183,7 +196,8 @@ TOKYO_NIGHT_STYLES = {
             border: 1px solid {TOKYO_NIGHT_COLORS['border']};
             border-radius: 4px;
             padding: 6px 10px;
-            font-size: 11px;
+            font-size: {TOKYO_NIGHT_FONTS['size_normal']};
+            font-family: {TOKYO_NIGHT_FONTS['family']};
             selection-background-color: {TOKYO_NIGHT_COLORS['selection']};
         }}
         
@@ -201,6 +215,8 @@ TOKYO_NIGHT_STYLES = {
         QLabel {{
             color: {TOKYO_NIGHT_COLORS['fg_primary']};
             background: transparent;
+            font-family: {TOKYO_NIGHT_FONTS['family']};
+            font-size: {TOKYO_NIGHT_FONTS['size_normal']};
         }}
     """,
     
@@ -210,6 +226,8 @@ TOKYO_NIGHT_STYLES = {
             border: 1px solid {TOKYO_NIGHT_COLORS['border']};
             border-radius: 4px;
             height: 6px;
+            font-family: {TOKYO_NIGHT_FONTS['family']};
+            font-size: {TOKYO_NIGHT_FONTS['size_small']};
         }}
         
         QProgressBar::chunk {{
@@ -223,7 +241,8 @@ TOKYO_NIGHT_STYLES = {
             background-color: {TOKYO_NIGHT_COLORS['bg_secondary']};
             color: {TOKYO_NIGHT_COLORS['fg_secondary']};
             border-top: 1px solid {TOKYO_NIGHT_COLORS['border']};
-            font-size: 11px;
+            font-family: {TOKYO_NIGHT_FONTS['family']};
+            font-size: {TOKYO_NIGHT_FONTS['size_normal']};
         }}
     """,
     
@@ -248,8 +267,43 @@ TOKYO_NIGHT_STYLES = {
     'form_layout': f"""
         QFormLayout QLabel {{
             color: {TOKYO_NIGHT_COLORS['fg_secondary']};
+            background: transparent;
             font-weight: 500;
-            font-size: 11px;
+            font-family: {TOKYO_NIGHT_FONTS['family']};
+            font-size: {TOKYO_NIGHT_FONTS['size_normal']};
+        }}
+    """,
+    
+    'message_box': f"""
+        QMessageBox {{
+            background-color: {TOKYO_NIGHT_COLORS['bg_primary']};
+            color: {TOKYO_NIGHT_COLORS['fg_primary']};
+        }}
+        
+        QMessageBox QLabel {{
+            color: {TOKYO_NIGHT_COLORS['fg_primary']};
+            background: transparent;
+            font-family: {TOKYO_NIGHT_FONTS['family']};
+            font-size: {TOKYO_NIGHT_FONTS['size_normal']};
+        }}
+        
+        QMessageBox QPushButton {{
+            background-color: {TOKYO_NIGHT_COLORS['accent_blue']};
+            color: {TOKYO_NIGHT_COLORS['bg_primary']};
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: {TOKYO_NIGHT_FONTS['size_normal']};
+            min-width: 80px;
+        }}
+        
+        QMessageBox QPushButton:hover {{
+            background-color: {TOKYO_NIGHT_COLORS['accent_purple']};
+        }}
+        
+        QMessageBox QPushButton:pressed {{
+            background-color: {TOKYO_NIGHT_COLORS['accent_cyan']};
         }}
     """,
 }

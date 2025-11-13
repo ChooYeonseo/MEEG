@@ -26,7 +26,8 @@ class CacheManager:
         cache_dir : str
             Directory to store cache files
         """
-        self.cache_dir = Path(cache_dir)
+        # Always resolve to absolute path to avoid creating cache folders in wrong locations
+        self.cache_dir = Path(cache_dir).resolve()
         self.cache_dir.mkdir(exist_ok=True)
         
     def _generate_cache_key(self, directory_path):
@@ -416,6 +417,8 @@ class CacheManager:
         
         print(f"Removed cached project: {cache_key}")
 
-
 # Global cache manager instance
-cache_manager = CacheManager()
+# Use absolute path relative to the project root (parent of utils directory)
+_project_root = Path(__file__).parent.parent
+_cache_path = _project_root / "cache"
+cache_manager = CacheManager(str(_cache_path))

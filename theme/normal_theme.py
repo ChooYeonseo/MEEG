@@ -5,6 +5,16 @@ This module contains the bright/light styling for the application with gray tone
 and high contrast for maximum readability.
 """
 
+# Font configuration (unified across all themes)
+NORMAL_FONTS = {
+    'family': 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
+    'mono_family': '"SF Mono", Monaco, "Cascadia Code", "Courier New", monospace',
+    'size_small': '10px',
+    'size_normal': '11px',
+    'size_medium': '12px',
+    'size_large': '14px',
+}
+
 # Bright theme color palette (gray tones with high contrast)
 NORMAL_COLORS = {
     'bg_primary': '#f5f5f5',      # Light gray background
@@ -39,8 +49,10 @@ NORMAL_THEME_STYLES = {
         QGroupBox {{
             background-color: {NORMAL_COLORS['bg_secondary']};
             font-weight: bold;
+            font-size: {NORMAL_FONTS['size_large']};
+            font-family: {NORMAL_FONTS['family']};
             border: 2px solid {NORMAL_COLORS['border']};
-            border-radius: 5px;
+            border-radius: 8px;
             margin-top: 8px;
             padding-top: 10px;
             color: {NORMAL_COLORS['fg_primary']};
@@ -60,8 +72,10 @@ NORMAL_THEME_STYLES = {
             color: white;
             border: none;
             padding: 10px 20px;
-            border-radius: 4px;
+            border-radius: 6px;
             font-weight: bold;
+            font-size: {NORMAL_FONTS['size_medium']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QPushButton:hover {{
@@ -84,7 +98,10 @@ NORMAL_THEME_STYLES = {
             border: 1px solid {NORMAL_COLORS['border']};
             color: {NORMAL_COLORS['fg_primary']};
             padding: 8px 16px;
-            border-radius: 4px;
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QPushButton:hover {{
@@ -103,6 +120,8 @@ NORMAL_THEME_STYLES = {
             border: 1px solid {NORMAL_COLORS['border']};
             border-radius: 4px;
             padding: 4px;
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QTextEdit:focus {{
@@ -117,7 +136,8 @@ NORMAL_THEME_STYLES = {
             border: 1px solid {NORMAL_COLORS['border']};
             border-radius: 4px;
             padding: 8px;
-            font-family: 'Consolas', 'Monaco', monospace;
+            font-family: {NORMAL_FONTS['mono_family']};
+            font-size: {NORMAL_FONTS['size_normal']};
         }}
     """,
     
@@ -128,6 +148,8 @@ NORMAL_THEME_STYLES = {
             border: 1px solid {NORMAL_COLORS['border']};
             border-radius: 4px;
             padding: 4px 8px;
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QLineEdit:focus {{
@@ -141,6 +163,8 @@ NORMAL_THEME_STYLES = {
             border-radius: 4px;
             background-color: {NORMAL_COLORS['bg_tertiary']};
             color: {NORMAL_COLORS['fg_primary']};
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QProgressBar::chunk {{
@@ -154,6 +178,8 @@ NORMAL_THEME_STYLES = {
             background-color: {NORMAL_COLORS['bg_secondary']};
             color: {NORMAL_COLORS['fg_primary']};
             border-top: 1px solid {NORMAL_COLORS['border']};
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QStatusBar QLabel {{
@@ -165,6 +191,8 @@ NORMAL_THEME_STYLES = {
         QLabel {{
             color: {NORMAL_COLORS['fg_primary']};
             background-color: transparent;
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
     """,
     
@@ -173,6 +201,8 @@ NORMAL_THEME_STYLES = {
             background-color: {NORMAL_COLORS['bg_secondary']};
             color: {NORMAL_COLORS['fg_primary']};
             border-bottom: 1px solid {NORMAL_COLORS['border']};
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QMenuBar::item {{
@@ -195,6 +225,8 @@ NORMAL_THEME_STYLES = {
             background-color: {NORMAL_COLORS['bg_secondary']};
             color: {NORMAL_COLORS['fg_primary']};
             border: 1px solid {NORMAL_COLORS['border']};
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QMenu::item {{
@@ -234,6 +266,8 @@ NORMAL_THEME_STYLES = {
             border: 1px solid {NORMAL_COLORS['border']};
             border-radius: 4px;
             padding: 6px 10px;
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
         }}
         
         QComboBox:hover {{
@@ -246,6 +280,51 @@ NORMAL_THEME_STYLES = {
             selection-background-color: {NORMAL_COLORS['accent_primary']};
             selection-color: white;
             border: 1px solid {NORMAL_COLORS['border']};
+            font-size: {NORMAL_FONTS['size_normal']};
+            font-family: {NORMAL_FONTS['family']};
+        }}
+    """,
+    
+    'form_layout': f"""
+        QFormLayout QLabel {{
+            color: {NORMAL_COLORS['fg_primary']};
+            background: transparent;
+            font-weight: 500;
+            font-family: {NORMAL_FONTS['family']};
+            font-size: {NORMAL_FONTS['size_normal']};
+        }}
+    """,
+    
+    'message_box': f"""
+        QMessageBox {{
+            background-color: {NORMAL_COLORS['bg_primary']};
+            color: {NORMAL_COLORS['fg_primary']};
+        }}
+        
+        QMessageBox QLabel {{
+            color: {NORMAL_COLORS['fg_primary']};
+            background: transparent;
+            font-family: {NORMAL_FONTS['family']};
+            font-size: {NORMAL_FONTS['size_normal']};
+        }}
+        
+        QMessageBox QPushButton {{
+            background-color: {NORMAL_COLORS['accent_primary']};
+            color: {NORMAL_COLORS['bg_primary']};
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: {NORMAL_FONTS['size_normal']};
+            min-width: 80px;
+        }}
+        
+        QMessageBox QPushButton:hover {{
+            background-color: {NORMAL_COLORS['accent_hover']};
+        }}
+        
+        QMessageBox QPushButton:pressed {{
+            background-color: {NORMAL_COLORS['accent_pressed']};
         }}
     """,
 }
