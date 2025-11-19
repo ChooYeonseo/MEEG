@@ -65,12 +65,11 @@ class InitialConfigDialog(QDialog):
         epoch_group = QGroupBox("Epoch Time Interval")
         epoch_layout = QFormLayout(epoch_group)
         
-        self.epoch_spin = QDoubleSpinBox()
-        self.epoch_spin.setRange(0.1, 60.0)
-        self.epoch_spin.setValue(1.0)
-        self.epoch_spin.setSingleStep(0.5)
+        self.epoch_spin = QSpinBox()
+        self.epoch_spin.setRange(1, 60)
+        self.epoch_spin.setValue(1)
+        self.epoch_spin.setSingleStep(1)
         self.epoch_spin.setSuffix(" seconds")
-        self.epoch_spin.setDecimals(1)
         epoch_layout.addRow("Epoch Length:", self.epoch_spin)
         
         layout.addWidget(epoch_group)
@@ -591,12 +590,20 @@ class EpilepsyLabelWindow(QWidget):
         
         # === Panel 3: Label Control Panel ===
         label_group = QGroupBox("Label Control Panel")
-        label_layout = QVBoxLayout(label_group)
+        label_layout = QFormLayout(label_group)
         
-        # Status indicator
-        status_layout = QHBoxLayout()
-        status_label = QLabel("Status:")
-        status_layout.addWidget(status_label)
+        # Epochs to show
+        self.label_epochs_combo = QComboBox()
+        self.label_epochs_combo.addItems(["1", "3", "5", "7", "9", "11", "13", "15"])
+        self.label_epochs_combo.setCurrentText(str(self.label_epochs_to_show))
+        self.label_epochs_combo.currentTextChanged.connect(self.on_label_epochs_changed)
+        label_layout.addRow("Epochs to Show:", self.label_epochs_combo)
+        
+        # Status indicator - create inline widget
+        status_widget = QWidget()
+        status_layout = QHBoxLayout(status_widget)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(5)
         
         self.label_status_indicator = QLabel("Empty")
         self.label_status_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -612,16 +619,8 @@ class EpilepsyLabelWindow(QWidget):
         """)
         status_layout.addWidget(self.label_status_indicator)
         status_layout.addStretch()
-        label_layout.addLayout(status_layout)
         
-        # Epochs to show
-        epochs_layout = QFormLayout()
-        self.label_epochs_combo = QComboBox()
-        self.label_epochs_combo.addItems(["1", "3", "5", "7", "9", "11", "13", "15"])
-        self.label_epochs_combo.setCurrentText(str(self.label_epochs_to_show))
-        self.label_epochs_combo.currentTextChanged.connect(self.on_label_epochs_changed)
-        epochs_layout.addRow("Epochs to Show:", self.label_epochs_combo)
-        label_layout.addLayout(epochs_layout)
+        label_layout.addRow("Status:", status_widget)
         
         horizontal_layout.addWidget(label_group)
         
