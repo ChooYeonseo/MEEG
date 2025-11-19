@@ -449,7 +449,9 @@ class TopographyWidget(QWidget):
         power_values : dict
             Dictionary with channel names and power values
         """
-        self.ax.clear()
+        # Clear the entire figure to remove old colorbar
+        self.figure.clear()
+        self.ax = self.figure.add_subplot(111)
         self.ax.set_facecolor(self.theme_colors['bg_primary'])
         self.ax.set_aspect('equal')
         self.ax.axis('off')
@@ -518,7 +520,7 @@ class TopographyWidget(QWidget):
         grid_power = np.where(boundary_mask, grid_power, np.nan)
         
         # Plot interpolated surface
-        self.ax.pcolormesh(
+        im = self.ax.pcolormesh(
             grid_x, grid_y, grid_power,
             cmap=colormap,
             norm=norm,
@@ -598,6 +600,31 @@ class TopographyWidget(QWidget):
         title = f"{self.current_freq_band[0]}-{self.current_freq_band[1]} Hz Band Power"
         self.ax.set_title(title, fontsize=10, fontweight='bold', 
                          color=self.theme_colors['fg_primary'], pad=5)
+        
+        # Add colorbar
+        cbar = self.figure.colorbar(im, ax=self.ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Power (μV²/Hz)', color=self.theme_colors['fg_primary'], fontsize=9)
+        cbar.ax.tick_params(colors=self.theme_colors['fg_primary'], labelsize=8)
+        # Set colorbar background
+        cbar.ax.set_facecolor(self.theme_colors['bg_primary'])
+        cbar.outline.set_edgecolor(self.theme_colors['fg_primary'])
+        
+        self.figure.tight_layout()
+        self.canvas.draw()
+    
+    def clear_display(self):
+        """Clear the topography display (used when disabled for performance)."""
+        self.ax.clear()
+        self.ax.set_facecolor(self.theme_colors['bg_primary'])
+        self.ax.set_aspect('equal')
+        self.ax.axis('off')
+        
+        # Show disabled message
+        self.ax.text(0.5, 0.5, 'Topography Disabled\n(for faster labeling)', 
+                    transform=self.ax.transAxes,
+                    ha='center', va='center', 
+                    fontsize=12, color=self.theme_colors['fg_primary'],
+                    style='italic')
         
         self.figure.tight_layout()
         self.canvas.draw()

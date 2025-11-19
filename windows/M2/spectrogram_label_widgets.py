@@ -21,10 +21,20 @@ class SpectrogramWidget(QWidget):
         super().__init__(parent)
         self.theme_colors = theme_colors or {'bg_primary': '#1a1a1a', 'fg_primary': '#ffffff'}
         self.data = None
-        self.sampling_rate = 1000.0
-        self.epoch_length = 10
+        self.sampling_rate = None  # Will be set when data is loaded
+        self.epoch_length = 1
         self.current_epoch = 0
-        self.epochs_to_show = 5
+        self.epochs_to_show = 15
+        
+        # Color limits for brightness control
+        self.vmin = None  # Auto by default
+        self.vmax = None  # Auto by default
+        self.last_computed_vmin = None  # Track last auto-computed values
+        self.last_computed_vmax = None
+        
+        # Pre-computed spectrogram matrix
+        self.precomputed_spectrogram = None  # Shape: (n_freq_bins, n_epochs)
+        self.freq_bins = None  # Frequency bin edges
         
         self.init_ui()
         
@@ -34,7 +44,7 @@ class SpectrogramWidget(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         
         # Title
-        title_label = QLabel("Power Spectrogram (2Hz bins)")
+        title_label = QLabel("Power Spectrogram (2Hz bins per epoch)")
         title_font = QFont()
         title_font.setPointSize(10)
         title_font.setBold(True)
@@ -53,64 +63,111 @@ class SpectrogramWidget(QWidget):
         # Initialize the plot
         self.update_plot()
         
+    def precompute_spectrogram(self):
+        """Pre-compute spectrogram for all epochs to speed up plotting."""
+        if self.data is None or len(self.data) == 0 or self.sampling_rate is None:
+            return
+        
+        print("Pre-computing spectrogram for all epochs...")
+        
+        # Calculate frequency bins with 2 Hz resolution
+        max_freq = 30  # Hz
+        self.freq_bins = np.arange(0, max_freq + 2, 2)  # 0-2, 2-4, 4-6, ..., 28-30 Hz
+        n_freq_bins = len(self.freq_bins) - 1
+        
+        # Get total number of epochs
+        n_epochs = self.get_n_epochs()
+        
+        # Initialize pre-computed matrix
+        self.precomputed_spectrogram = np.zeros((n_freq_bins, n_epochs))
+        
+        # Compute power for each epoch
+        from scipy.signal import welch
+        
+        for epoch_idx in range(n_epochs):
+            # Get data for this epoch
+            epoch_start_sample = int(epoch_idx * self.epoch_length * self.sampling_rate)
+            epoch_end_sample = int((epoch_idx + 1) * self.epoch_length * self.sampling_rate)
+            epoch_end_sample = min(epoch_end_sample, len(self.data))
+            
+            if epoch_start_sample >= len(self.data):
+                break
+            
+            epoch_data = self.data[epoch_start_sample:epoch_end_sample]
+            
+            if len(epoch_data) == 0:
+                continue
+            
+            # Compute PSD using Welch's method
+            frequencies, psd = welch(epoch_data, fs=self.sampling_rate, 
+                                    nperseg=min(len(epoch_data), int(self.sampling_rate)))
+            
+            # Bin the power into 2 Hz bins
+            for bin_idx in range(n_freq_bins):
+                freq_low = self.freq_bins[bin_idx]
+                freq_high = self.freq_bins[bin_idx + 1]
+                
+                # Find frequencies in this bin
+                freq_mask = (frequencies >= freq_low) & (frequencies < freq_high)
+                
+                if freq_mask.any():
+                    # Average power in this bin
+                    self.precomputed_spectrogram[bin_idx, epoch_idx] = np.mean(psd[freq_mask])
+        
+        # Convert power to dB scale
+        self.precomputed_spectrogram = 10 * np.log10(self.precomputed_spectrogram + 1e-10)
+        
+        print(f"Spectrogram pre-computation complete: {n_epochs} epochs, {n_freq_bins} frequency bins")
+    
     def update_plot(self):
-        """Update the spectrogram display."""
+        """Update the spectrogram display using pre-computed data."""
         self.ax.clear()
         self.ax.set_facecolor(self.theme_colors['bg_primary'])
         
-        if self.data is None or len(self.data) == 0:
+        if self.precomputed_spectrogram is None or self.freq_bins is None:
             self.ax.text(0.5, 0.5, 'No data to display', 
                         transform=self.ax.transAxes,
                         ha='center', va='center', color=self.theme_colors['fg_primary'], fontsize=10)
             self.canvas.draw()
             return
         
-        # Calculate time range
+        # Calculate time range - show epochs around current epoch
+        n_total_epochs = self.precomputed_spectrogram.shape[1]
         start_epoch = max(0, self.current_epoch - self.epochs_to_show // 2)
-        end_epoch = min(self.get_n_epochs(), start_epoch + self.epochs_to_show)
+        end_epoch = min(n_total_epochs, start_epoch + self.epochs_to_show)
         
-        start_sample = int(start_epoch * self.epoch_length * self.sampling_rate)
-        end_sample = int(end_epoch * self.epoch_length * self.sampling_rate)
-        end_sample = min(end_sample, len(self.data))
+        # Extract the relevant portion of pre-computed spectrogram
+        power_matrix_db = self.precomputed_spectrogram[:, start_epoch:end_epoch]
         
-        if start_sample >= end_sample:
-            self.canvas.draw()
-            return
+        # Plot as image with blue-green-yellow colormap
+        extent = [start_epoch, end_epoch, self.freq_bins[0], self.freq_bins[-1]]
         
-        data_slice = self.data[start_sample:end_sample]
-        
-        # Compute spectrogram with 2Hz bins
-        nperseg = int(self.sampling_rate)  # 1 second window for 1Hz resolution
-        # Use noverlap to get 2Hz resolution
-        noverlap = int(nperseg * 0.5)
-        
-        f, t, Sxx = signal.spectrogram(data_slice, self.sampling_rate,
-                                       nperseg=nperseg, noverlap=noverlap)
-        
-        # Limit frequency range to 0-30 Hz
-        freq_mask = f <= 30
-        f = f[freq_mask]
-        Sxx = Sxx[freq_mask, :]
-        
-        # Convert power to dB
-        Sxx_db = 10 * np.log10(Sxx + 1e-10)
-        
-        # Plot spectrogram
-        extent = [start_epoch * self.epoch_length, 
-                 start_epoch * self.epoch_length + len(data_slice) / self.sampling_rate,
-                 f[0], f[-1]]
-        
-        im = self.ax.imshow(Sxx_db, aspect='auto', origin='lower', 
-                          extent=extent, cmap='jet', interpolation='bilinear')
+        # Apply color limits if set
+        if self.vmin is None or self.vmax is None:
+            im = self.ax.imshow(power_matrix_db, aspect='auto', origin='lower', 
+                              extent=extent, cmap='viridis', interpolation='nearest')
+            # Store auto-computed values
+            self.last_computed_vmin = im.get_clim()[0]
+            self.last_computed_vmax = im.get_clim()[1]
+        else:
+            im = self.ax.imshow(power_matrix_db, aspect='auto', origin='lower', 
+                              extent=extent, cmap='viridis', interpolation='nearest',
+                              vmin=self.vmin, vmax=self.vmax)
+            # Update stored values
+            self.last_computed_vmin = self.vmin
+            self.last_computed_vmax = self.vmax
         
         # Highlight current epoch
-        epoch_start_time = self.current_epoch * self.epoch_length
-        epoch_end_time = (self.current_epoch + 1) * self.epoch_length
-        self.ax.axvline(epoch_start_time, color='white', linewidth=2, linestyle='--')
-        self.ax.axvline(epoch_end_time, color='white', linewidth=2, linestyle='--')
+        self.ax.axvline(self.current_epoch, color='white', linewidth=2, linestyle='-', alpha=0.8)
+        self.ax.axvline(self.current_epoch + 1, color='white', linewidth=2, linestyle='-', alpha=0.8)
         
-        self.ax.set_xlabel('Time (s)', fontsize=9, color=self.theme_colors['fg_primary'])
+        # Set axis labels and ticks
+        self.ax.set_xlabel('Epoch', fontsize=9, color=self.theme_colors['fg_primary'])
         self.ax.set_ylabel('Frequency (Hz)', fontsize=9, color=self.theme_colors['fg_primary'])
+        
+        # Set y-axis ticks at 2 Hz intervals
+        self.ax.set_yticks(self.freq_bins)
+        
         self.ax.tick_params(colors=self.theme_colors['fg_primary'], labelsize=8)
         self.ax.spines['bottom'].set_color(self.theme_colors['fg_primary'])
         self.ax.spines['left'].set_color(self.theme_colors['fg_primary'])
@@ -122,7 +179,7 @@ class SpectrogramWidget(QWidget):
         
     def get_n_epochs(self):
         """Get total number of epochs."""
-        if self.data is None or self.sampling_rate == 0:
+        if self.data is None or self.sampling_rate is None or self.sampling_rate == 0:
             return 0
         total_samples = len(self.data)
         samples_per_epoch = int(self.sampling_rate * self.epoch_length)
@@ -147,6 +204,32 @@ class SpectrogramWidget(QWidget):
         """Update the data to display."""
         self.data = data
         self.sampling_rate = sampling_rate
+        # Pre-compute spectrogram for all epochs
+        self.precompute_spectrogram()
+        self.update_plot()
+    
+    def get_color_limits(self):
+        """Get current color limits (vmin, vmax).
+        
+        Returns:
+        --------
+        tuple : (vmin, vmax)
+            Current color scale limits
+        """
+        return self.last_computed_vmin, self.last_computed_vmax
+    
+    def set_color_limits(self, vmin, vmax):
+        """Set color limits for brightness control.
+        
+        Parameters:
+        -----------
+        vmin : float or None
+            Minimum value for color scale (None for auto)
+        vmax : float or None
+            Maximum value for color scale (None for auto)
+        """
+        self.vmin = vmin
+        self.vmax = vmax
         self.update_plot()
 
 

@@ -10,10 +10,11 @@ import numpy as np
 import pandas as pd
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QMessageBox, QTextEdit, QSpinBox, QPushButton,
-                             QGroupBox, QFormLayout, QSplitter, QFileDialog)
+                             QGroupBox, QFormLayout, QSplitter, QFileDialog,
+                             QDialog, QDoubleSpinBox, QCheckBox, QComboBox,
+                             QDialogButtonBox, QMenuBar)
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QFont, QColor, QAction
 
 # Import theme system
 from theme import preferences_manager
@@ -22,6 +23,126 @@ from theme import preferences_manager
 from .topowindow import TopographyWidget
 from .mosaicwindow import MosaicPlotterWidget
 from .spectrogram_label_widgets import SpectrogramWidget, LabelWidget
+
+
+class InitialConfigDialog(QDialog):
+    """Dialog to configure epoch time interval and sampling rate before main window."""
+    
+    def __init__(self, detected_sampling_rate=None, theme_colors=None, parent=None):
+        super().__init__(parent)
+        self.detected_sampling_rate = detected_sampling_rate
+        self.epoch_length = 1  # default
+        self.sampling_rate = detected_sampling_rate
+        self.theme_colors = theme_colors or {'bg_primary': '#1a1a1a', 'fg_primary': '#ffffff'}
+        self.init_ui()
+        
+    def init_ui(self):
+        """Initialize the configuration dialog UI."""
+        self.setWindowTitle("EEG Analysis Configuration")
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        
+        # Set background color to match theme
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QColor(self.theme_colors['bg_primary']))
+        self.setPalette(palette)
+        
+        layout = QVBoxLayout(self)
+        
+        # Title
+        title = QLabel("Configure Analysis Parameters")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+        
+        layout.addSpacing(20)
+        
+        # Epoch length input
+        epoch_group = QGroupBox("Epoch Time Interval")
+        epoch_layout = QFormLayout(epoch_group)
+        
+        self.epoch_spin = QDoubleSpinBox()
+        self.epoch_spin.setRange(0.1, 60.0)
+        self.epoch_spin.setValue(1.0)
+        self.epoch_spin.setSingleStep(0.5)
+        self.epoch_spin.setSuffix(" seconds")
+        self.epoch_spin.setDecimals(1)
+        epoch_layout.addRow("Epoch Length:", self.epoch_spin)
+        
+        layout.addWidget(epoch_group)
+        
+        # Sampling rate section
+        sampling_group = QGroupBox("Sampling Rate")
+        sampling_layout = QVBoxLayout(sampling_group)
+        
+        # Detected sampling rate display
+        if self.detected_sampling_rate:
+            detected_label = QLabel(f"Detected: {self.detected_sampling_rate:.0f} Hz")
+            detected_font = QFont()
+            detected_font.setBold(True)
+            detected_label.setFont(detected_font)
+            sampling_layout.addWidget(detected_label)
+            
+            # Checkbox to use detected rate
+            self.use_detected_check = QCheckBox("Use detected sampling rate")
+            self.use_detected_check.setChecked(True)
+            self.use_detected_check.toggled.connect(self.on_use_detected_toggled)
+            sampling_layout.addWidget(self.use_detected_check)
+        else:
+            self.use_detected_check = None
+            no_detect_label = QLabel("No sampling rate detected")
+            sampling_layout.addWidget(no_detect_label)
+        
+        # Manual sampling rate input
+        manual_layout = QFormLayout()
+        self.sampling_spin = QDoubleSpinBox()
+        self.sampling_spin.setRange(1.0, 100000.0)
+        self.sampling_spin.setValue(self.detected_sampling_rate if self.detected_sampling_rate else 2000.0)
+        self.sampling_spin.setSingleStep(100.0)
+        self.sampling_spin.setSuffix(" Hz")
+        self.sampling_spin.setDecimals(1)
+        self.sampling_spin.setEnabled(False if self.detected_sampling_rate else True)
+        manual_layout.addRow("Manual Override:", self.sampling_spin)
+        
+        sampling_layout.addLayout(manual_layout)
+        layout.addWidget(sampling_group)
+        
+        layout.addSpacing(20)
+        
+        # Button box
+        button_box = QDialogButtonBox()
+        self.go_button = QPushButton("Go")
+        self.go_button.setDefault(True)
+        self.go_button.clicked.connect(self.accept)
+        button_box.addButton(self.go_button, QDialogButtonBox.ButtonRole.AcceptRole)
+        
+        cancel_button = button_box.addButton(QDialogButtonBox.StandardButton.Cancel)
+        cancel_button.clicked.connect(self.reject)
+        
+        layout.addWidget(button_box)
+        
+    def on_use_detected_toggled(self, checked):
+        """Handle use detected checkbox toggle."""
+        self.sampling_spin.setEnabled(not checked)
+        
+    def accept(self):
+        """Validate and accept configuration."""
+        self.epoch_length = self.epoch_spin.value()
+        
+        if self.use_detected_check and self.use_detected_check.isChecked():
+            self.sampling_rate = self.detected_sampling_rate
+        else:
+            self.sampling_rate = self.sampling_spin.value()
+        
+        super().accept()
+        
+    def get_config(self):
+        """Return the configured parameters."""
+        return self.epoch_length, self.sampling_rate
 
 
 class EpilepsyLabelWindow(QWidget):
@@ -39,13 +160,35 @@ class EpilepsyLabelWindow(QWidget):
         self.load_theme()
         
         # Extract EEG data from cache
-        self.df, self.mosaic, self.sampling_rate = self.extract_eeg_data()
+        self.df, self.mosaic, self.detected_sampling_rate = self.extract_eeg_data()
+        
+        # Show configuration dialog
+        config_dialog = InitialConfigDialog(self.detected_sampling_rate, self.theme_colors, parent)
+        if config_dialog.exec() != QDialog.DialogCode.Accepted:
+            # User cancelled - close window
+            self.close()
+            return
+        
+        # Get configuration from dialog
+        self.epoch_length, self.sampling_rate = config_dialog.get_config()
         
         # Initialize epoch parameters
-        self.epoch_length = 1  # seconds
         self.current_epoch = 0
-        self.epochs_to_show = 15  # Display 5 epochs at once
+        self.mosaic_epochs_to_show = 15  # For mosaic plot
+        self.label_epochs_to_show = 5   # For label widget
+        # Set spectrogram to full view initially - will be updated after data is loaded
+        self.spectrogram_epochs_to_show = None  # Will be set to total epochs
         self.label_file = None  # CSV file for labels
+        
+        # Spectrogram brightness controls
+        self.spectrogram_vmin = None  # Auto
+        self.spectrogram_vmax = None  # Auto
+        self.zoom_acceleration = 1  # Tracks consecutive zoom operations
+        self.last_zoom_time = 0  # Track last zoom button click time
+        self.zoom_threshold = 0.7  # Time threshold for continuous clicks (seconds)
+        
+        # Topography toggle state
+        self.topo_enabled = True  # Topography updates enabled by default
         
         self.init_ui()
         
@@ -285,6 +428,26 @@ class EpilepsyLabelWindow(QWidget):
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
         
+        # Create menu bar
+        menu_bar = QMenuBar()
+        
+        # File menu
+        file_menu = menu_bar.addMenu("File")
+        
+        create_label_action = QAction("Create Label File", self)
+        create_label_action.triggered.connect(self.create_label_file)
+        file_menu.addAction(create_label_action)
+        
+        import_label_action = QAction("Import Label File", self)
+        import_label_action.triggered.connect(self.import_label_file)
+        file_menu.addAction(import_label_action)
+        
+        save_labels_action = QAction("Save Labels", self)
+        save_labels_action.triggered.connect(self.save_labels)
+        file_menu.addAction(save_labels_action)
+        
+        main_layout.setMenuBar(menu_bar)
+        
         # Create main splitter (left 0.3 | right 0.7)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         
@@ -320,6 +483,8 @@ class EpilepsyLabelWindow(QWidget):
         # Right Upper: Mosaic Plotter (0.6 height)
         self.mosaic_plotter = MosaicPlotterWidget(self.df, self.mosaic, self.sampling_rate, self.theme_colors)
         self.mosaic_plotter.epoch_clicked.connect(self.on_epoch_selected)
+        self.mosaic_plotter.set_epochs_to_show(self.mosaic_epochs_to_show)
+        self.mosaic_plotter.set_epoch_length(self.epoch_length)
         right_layout.addWidget(self.mosaic_plotter, 60)  # 60% stretch
         
         # Right Middle: Spectrogram (0.2 height)
@@ -327,7 +492,17 @@ class EpilepsyLabelWindow(QWidget):
         # Get first channel for spectrogram if available
         if not self.df.empty:
             first_channel_data = self.df.iloc[:, 0].values
+            print(f"Setting spectrogram data with {len(first_channel_data)} samples at {self.sampling_rate} Hz...")
+            # This will trigger pre-computation of spectrogram
             self.spectrogram_widget.set_data(first_channel_data, self.sampling_rate)
+        
+        # Set initial spectrogram view to full length (all epochs)
+        if self.spectrogram_epochs_to_show is None:
+            self.spectrogram_epochs_to_show = self.get_n_epochs()
+            print(f"Initial spectrogram view set to full length: {self.spectrogram_epochs_to_show} epochs")
+        
+        self.spectrogram_widget.set_epochs_to_show(self.spectrogram_epochs_to_show)
+        self.spectrogram_widget.set_epoch_length(self.epoch_length)
         right_layout.addWidget(self.spectrogram_widget, 20)  # 20% stretch
         
         # Right Lower: Label Window (0.2 height)
@@ -336,6 +511,7 @@ class EpilepsyLabelWindow(QWidget):
         # Initialize labels based on number of epochs
         n_epochs = self.get_n_epochs()
         self.label_widget.initialize_labels(n_epochs)
+        self.label_widget.set_epochs_to_show(self.label_epochs_to_show)
         right_layout.addWidget(self.label_widget, 20)  # 20% stretch
         
         main_splitter.addWidget(right_widget)
@@ -349,13 +525,14 @@ class EpilepsyLabelWindow(QWidget):
         self.update_epoch_displays()
         
     def create_control_panel(self):
-        """Create the control panel widget."""
-        panel = QGroupBox("Control Panel")
-        
+        """Create the control panel widget with 3 sub-panels."""
+        panel = QWidget()
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(10)
         
         # Title
-        title = QLabel("Seizure Analysis Controls")
+        title = QLabel("Analysis Controls")
         title_font = QFont()
         title_font.setPointSize(12)
         title_font.setBold(True)
@@ -364,7 +541,6 @@ class EpilepsyLabelWindow(QWidget):
         layout.addWidget(title)
         
         # Data summary
-        num_channels = len(self.df.columns) if not self.df.empty else 0
         num_samples = len(self.df) if not self.df.empty else 0
         n_epochs = self.get_n_epochs()
         duration_sec = num_samples / self.sampling_rate if self.sampling_rate and self.sampling_rate > 0 else 0
@@ -372,72 +548,125 @@ class EpilepsyLabelWindow(QWidget):
         summary_group = QGroupBox("Data Summary")
         summary_layout = QFormLayout(summary_group)
         summary_layout.addRow("Electrodes:", QLabel(str(len(self.electrode_positions))))
-        summary_layout.addRow("Mapped Channels:", QLabel(str(len(self.channel_mapping))))
-        summary_layout.addRow("Mosaic Pairs:", QLabel(str(len(self.mosaic))))
         summary_layout.addRow("Sampling Rate:", QLabel(f"{self.sampling_rate:.0f} Hz"))
         summary_layout.addRow("Duration:", QLabel(f"{duration_sec:.1f} sec"))
+        summary_layout.addRow("Epoch Length:", QLabel(f"{self.epoch_length:.1f} sec"))
         summary_layout.addRow("Total Epochs:", QLabel(str(n_epochs)))
         layout.addWidget(summary_group)
         
-        # Epoch controls
-        epoch_group = QGroupBox("Epoch Controls")
-        epoch_layout = QFormLayout(epoch_group)
+        # Topography toggle
+        topo_group = QGroupBox("Topography Display")
+        topo_layout = QVBoxLayout(topo_group)
         
-        # Epoch length
-        self.epoch_length_spin = QSpinBox()
-        self.epoch_length_spin.setRange(1, 60)
-        self.epoch_length_spin.setValue(self.epoch_length)
-        self.epoch_length_spin.setSuffix(" sec")
-        self.epoch_length_spin.valueChanged.connect(self.on_epoch_length_changed)
-        epoch_layout.addRow("Epoch Length:", self.epoch_length_spin)
+        self.topo_toggle_btn = QPushButton("Disable Topography")
+        self.topo_toggle_btn.setCheckable(True)
+        self.topo_toggle_btn.setChecked(False)  # Not disabled by default
+        self.topo_toggle_btn.clicked.connect(self.on_topo_toggle_clicked)
+        topo_layout.addWidget(self.topo_toggle_btn)
+        
+        topo_info = QLabel("Disable to speed up labeling")
+        topo_info.setWordWrap(True)
+        topo_info.setStyleSheet("font-size: 9px; color: gray;")
+        topo_layout.addWidget(topo_info)
+        
+        layout.addWidget(topo_group)
+        
+        # === Horizontal container for Panel 1 and Panel 3 ===
+        horizontal_panels = QWidget()
+        horizontal_layout = QHBoxLayout(horizontal_panels)
+        horizontal_layout.setContentsMargins(0, 0, 0, 0)
+        horizontal_layout.setSpacing(5)
+        
+        # === Panel 1: EEG Display Control ===
+        eeg_group = QGroupBox("EEG Display Control")
+        eeg_layout = QFormLayout(eeg_group)
+        
+        self.mosaic_epochs_combo = QComboBox()
+        self.mosaic_epochs_combo.addItems(["1", "3", "5", "7", "9", "11", "13", "15"])
+        self.mosaic_epochs_combo.setCurrentText(str(self.mosaic_epochs_to_show))
+        self.mosaic_epochs_combo.currentTextChanged.connect(self.on_mosaic_epochs_changed)
+        eeg_layout.addRow("Epochs to Show:", self.mosaic_epochs_combo)
+        
+        horizontal_layout.addWidget(eeg_group)
+        
+        # === Panel 3: Label Control Panel ===
+        label_group = QGroupBox("Label Control Panel")
+        label_layout = QVBoxLayout(label_group)
+        
+        # Status indicator
+        status_layout = QHBoxLayout()
+        status_label = QLabel("Status:")
+        status_layout.addWidget(status_label)
+        
+        self.label_status_indicator = QLabel("Empty")
+        self.label_status_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_status_indicator.setStyleSheet("""
+            QLabel {
+                background-color: #d32f2f;
+                color: white;
+                padding: 5px 15px;
+                border-radius: 3px;
+                font-weight: bold;
+                font-size: 10px;
+            }
+        """)
+        status_layout.addWidget(self.label_status_indicator)
+        status_layout.addStretch()
+        label_layout.addLayout(status_layout)
         
         # Epochs to show
-        self.epochs_to_show_spin = QSpinBox()
-        self.epochs_to_show_spin.setRange(1, 20)
-        self.epochs_to_show_spin.setValue(self.epochs_to_show)
-        self.epochs_to_show_spin.valueChanged.connect(self.on_epochs_to_show_changed)
-        epoch_layout.addRow("Epochs to Show:", self.epochs_to_show_spin)
+        epochs_layout = QFormLayout()
+        self.label_epochs_combo = QComboBox()
+        self.label_epochs_combo.addItems(["1", "3", "5", "7", "9", "11", "13", "15"])
+        self.label_epochs_combo.setCurrentText(str(self.label_epochs_to_show))
+        self.label_epochs_combo.currentTextChanged.connect(self.on_label_epochs_changed)
+        epochs_layout.addRow("Epochs to Show:", self.label_epochs_combo)
+        label_layout.addLayout(epochs_layout)
         
-        # Current epoch
-        self.current_epoch_spin = QSpinBox()
-        self.current_epoch_spin.setRange(0, max(0, n_epochs - 1))
-        self.current_epoch_spin.setValue(self.current_epoch)
-        self.current_epoch_spin.valueChanged.connect(self.on_current_epoch_changed)
-        epoch_layout.addRow("Current Epoch:", self.current_epoch_spin)
+        horizontal_layout.addWidget(label_group)
         
-        layout.addWidget(epoch_group)
+        layout.addWidget(horizontal_panels)
         
-        # Navigation buttons
-        nav_group = QGroupBox("Navigation")
-        nav_layout = QHBoxLayout(nav_group)
+        # === Panel 2: Spectrogram Control Panel ===
+        spec_group = QGroupBox("Spectrogram Control Panel")
+        spec_layout = QVBoxLayout(spec_group)
         
-        prev_btn = QPushButton("← Previous")
-        prev_btn.clicked.connect(self.previous_epoch)
-        nav_layout.addWidget(prev_btn)
+        # Brightness controls
+        brightness_layout = QHBoxLayout()
+        brightness_label = QLabel("Brightness:")
+        brightness_layout.addWidget(brightness_label)
         
-        next_btn = QPushButton("Next →")
-        next_btn.clicked.connect(self.next_epoch)
-        nav_layout.addWidget(next_btn)
+        self.dimmer_btn = QPushButton("Dimmer")
+        self.dimmer_btn.clicked.connect(self.on_dimmer_clicked)
+        brightness_layout.addWidget(self.dimmer_btn)
         
-        layout.addWidget(nav_group)
+        self.brighter_btn = QPushButton("Brighter")
+        self.brighter_btn.clicked.connect(self.on_brighter_clicked)
+        brightness_layout.addWidget(self.brighter_btn)
         
-        # Label file buttons
-        action_group = QGroupBox("Labels")
-        action_layout = QVBoxLayout(action_group)
+        spec_layout.addLayout(brightness_layout)
         
-        create_btn = QPushButton("Create Label File")
-        create_btn.clicked.connect(self.create_label_file)
-        action_layout.addWidget(create_btn)
+        # Zoom controls
+        zoom_layout = QHBoxLayout()
+        zoom_label = QLabel("Zoom:")
+        zoom_layout.addWidget(zoom_label)
         
-        import_btn = QPushButton("Import Label File")
-        import_btn.clicked.connect(self.import_label_file)
-        action_layout.addWidget(import_btn)
+        self.zoom_out_btn = QPushButton("- (Show More)")
+        self.zoom_out_btn.clicked.connect(self.on_zoom_out_clicked)
+        zoom_layout.addWidget(self.zoom_out_btn)
         
-        save_btn = QPushButton("Save Labels")
-        save_btn.clicked.connect(self.save_labels)
-        action_layout.addWidget(save_btn)
+        self.zoom_in_btn = QPushButton("+ (Show Less)")
+        self.zoom_in_btn.clicked.connect(self.on_zoom_in_clicked)
+        zoom_layout.addWidget(self.zoom_in_btn)
         
-        layout.addWidget(action_group)
+        spec_layout.addLayout(zoom_layout)
+        
+        # Current epochs shown
+        self.spec_epochs_label = QLabel(f"Showing {self.spectrogram_epochs_to_show} epochs")
+        self.spec_epochs_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        spec_layout.addWidget(self.spec_epochs_label)
+        
+        layout.addWidget(spec_group)
         
         layout.addStretch()
         
@@ -486,69 +715,170 @@ class EpilepsyLabelWindow(QWidget):
         
     def update_epoch_displays(self):
         """Update all widgets to show current epoch."""
+        # Update all widgets with the same current epoch
         self.mosaic_plotter.set_epoch(self.current_epoch)
         self.spectrogram_widget.set_epoch(self.current_epoch)
         self.label_widget.set_epoch(self.current_epoch)
-        self.topo_widget.set_epoch(self.current_epoch)
         
-        # Extract epoch data and pass to topography widget
-        epoch_data = self.get_epoch_data(self.current_epoch)
-        if epoch_data is not None:
-            self.topo_widget.set_data(epoch_data, self.sampling_rate, self.epoch_length)
+        # Only update topography if enabled
+        if self.topo_enabled:
+            self.topo_widget.set_epoch(self.current_epoch)
+            
+            # Extract epoch data and pass to topography widget
+            epoch_data = self.get_epoch_data(self.current_epoch)
+            if epoch_data is not None:
+                self.topo_widget.set_data(epoch_data, self.sampling_rate, self.epoch_length)
         
     def on_epoch_selected(self, epoch_idx):
         """Handle epoch selection from mosaic plotter."""
         self.current_epoch = epoch_idx
-        self.current_epoch_spin.setValue(epoch_idx)
         self.update_epoch_displays()
         
     def on_label_changed(self, epoch_idx, score):
-        """Handle label change from label widget."""
-        print(f"Epoch {epoch_idx} labeled as Racine score {score}")
+        """Handle label change from label widget.
+        
+        This is called whenever:
+        - User labels an epoch (0-8 key press)
+        - User navigates with arrow keys
+        - User clicks on an epoch in the label widget
+        
+        It ensures all widgets (mosaic, spectrogram, topography) stay synchronized
+        with the current epoch shown in the label widget.
+        """
+        print(f"Epoch {epoch_idx} - Racine score {score}")
         # Sync current epoch and update all displays
         self.current_epoch = epoch_idx
-        self.current_epoch_spin.setValue(epoch_idx)
         self.update_epoch_displays()
+    
+    def on_mosaic_epochs_changed(self, value):
+        """Handle mosaic epochs to show change."""
+        self.mosaic_epochs_to_show = int(value)
+        self.mosaic_plotter.set_epochs_to_show(self.mosaic_epochs_to_show)
         
-    def on_epoch_length_changed(self, value):
-        """Handle epoch length change."""
-        self.epoch_length = value
-        # Update widgets with new epoch length
-        self.mosaic_plotter.set_epoch_length(value)
-        self.spectrogram_widget.set_epoch_length(value)
-        self.topo_widget.set_epoch_length(value)
-        # Recalculate epochs
-        n_epochs = self.get_n_epochs()
-        self.current_epoch_spin.setRange(0, max(0, n_epochs - 1))
-        self.label_widget.initialize_labels(n_epochs)
-        self.update_epoch_displays()
-        
-    def on_epochs_to_show_changed(self, value):
-        """Handle epochs to show change."""
-        self.epochs_to_show = value
-        self.mosaic_plotter.set_epochs_to_show(value)
-        self.spectrogram_widget.set_epochs_to_show(value)
-        self.label_widget.set_epochs_to_show(value)
-        
-    def on_current_epoch_changed(self, value):
-        """Handle current epoch change from spin box."""
-        self.current_epoch = value
-        self.update_epoch_displays()
-        
-    def previous_epoch(self):
-        """Navigate to previous epoch."""
-        if self.current_epoch > 0:
-            self.current_epoch -= 1
-            self.current_epoch_spin.setValue(self.current_epoch)
+    def on_label_epochs_changed(self, value):
+        """Handle label epochs to show change."""
+        self.label_epochs_to_show = int(value)
+        self.label_widget.set_epochs_to_show(self.label_epochs_to_show)
+    
+    def on_topo_toggle_clicked(self, checked):
+        """Handle topography enable/disable toggle."""
+        if checked:
+            # Disable topography
+            self.topo_enabled = False
+            self.topo_toggle_btn.setText("Enable Topography")
+            # Clear the topography display
+            self.topo_widget.clear_display()
+            print("Topography updates disabled for faster labeling")
+        else:
+            # Enable topography
+            self.topo_enabled = True
+            self.topo_toggle_btn.setText("Disable Topography")
+            # Update with current epoch
             self.update_epoch_displays()
-            
-    def next_epoch(self):
-        """Navigate to next epoch."""
+            print("Topography updates enabled")
+        
+    def on_brighter_clicked(self):
+        """Make spectrogram brighter by adjusting color limits."""
+        # Reset acceleration counter
+        self.zoom_acceleration = 1
+        
+        # Adjust brightness (reduce dynamic range)
+        if self.spectrogram_vmax is None:
+            # Get current auto values from spectrogram
+            self.spectrogram_vmin, self.spectrogram_vmax = self.spectrogram_widget.get_color_limits()
+        
+        if self.spectrogram_vmin is not None and self.spectrogram_vmax is not None:
+            range_val = self.spectrogram_vmax - self.spectrogram_vmin
+            # Reduce max, making bright areas dimmer (overall brighter look)
+            self.spectrogram_vmax -= range_val * 0.1
+            self.spectrogram_widget.set_color_limits(self.spectrogram_vmin, self.spectrogram_vmax)
+    
+    def on_dimmer_clicked(self):
+        """Make spectrogram dimmer by adjusting color limits."""
+        # Reset acceleration counter
+        self.zoom_acceleration = 1
+        
+        # Adjust brightness (increase dynamic range)
+        if self.spectrogram_vmax is None:
+            # Get current auto values from spectrogram
+            self.spectrogram_vmin, self.spectrogram_vmax = self.spectrogram_widget.get_color_limits()
+        
+        if self.spectrogram_vmin is not None and self.spectrogram_vmax is not None:
+            range_val = self.spectrogram_vmax - self.spectrogram_vmin
+            # Increase max, making bright areas brighter (overall dimmer look)
+            self.spectrogram_vmax += range_val * 0.1
+            self.spectrogram_widget.set_color_limits(self.spectrogram_vmin, self.spectrogram_vmax)
+    
+    def on_zoom_in_clicked(self):
+        """Zoom in - show fewer epochs (more detail)."""
+        import time
+        current_time = time.time()
+        
+        # Check if this is a continuous click (within threshold)
+        if (current_time - self.last_zoom_time) <= self.zoom_threshold:
+            # Continuous click - use exponential acceleration
+            # Formula designed so ~10 clicks goes from full view to 1 epoch
+            n_epochs = self.get_n_epochs()
+            if n_epochs > 1:
+                # Calculate step size based on current position and acceleration
+                # Use exponential growth: step = max(1, current_epochs * factor)
+                factor = 0.25 * self.zoom_acceleration  # Acceleration factor
+                step = max(1, int(self.spectrogram_epochs_to_show * factor))
+            else:
+                step = 1
+        else:
+            # Non-continuous click - linear step
+            step = 1
+            self.zoom_acceleration = 1  # Reset acceleration
+        
+        self.last_zoom_time = current_time
+        
+        new_epochs = max(1, self.spectrogram_epochs_to_show - step)
+        if new_epochs != self.spectrogram_epochs_to_show:
+            self.spectrogram_epochs_to_show = new_epochs
+            self.spectrogram_widget.set_epochs_to_show(self.spectrogram_epochs_to_show)
+            self.spec_epochs_label.setText(f"Showing {self.spectrogram_epochs_to_show} epochs")
+            # Increase acceleration for consecutive clicks
+            self.zoom_acceleration = min(3.0, self.zoom_acceleration + 0.3)
+        else:
+            # Can't zoom more, reset acceleration
+            self.zoom_acceleration = 1
+    
+    def on_zoom_out_clicked(self):
+        """Zoom out - show more epochs (wider view)."""
+        import time
+        current_time = time.time()
+        
+        # Check if this is a continuous click (within threshold)
+        if (current_time - self.last_zoom_time) <= self.zoom_threshold:
+            # Continuous click - use exponential acceleration
+            # Formula designed so ~10 clicks goes from 1 epoch to full view
+            n_epochs = self.get_n_epochs()
+            if n_epochs > 1:
+                # Calculate step size based on remaining distance and acceleration
+                remaining = n_epochs - self.spectrogram_epochs_to_show
+                factor = 0.25 * self.zoom_acceleration  # Acceleration factor
+                step = max(1, int(self.spectrogram_epochs_to_show * factor))
+            else:
+                step = 1
+        else:
+            # Non-continuous click - linear step
+            step = 1
+            self.zoom_acceleration = 1  # Reset acceleration
+        
+        self.last_zoom_time = current_time
+        
         n_epochs = self.get_n_epochs()
-        if self.current_epoch < n_epochs - 1:
-            self.current_epoch += 1
-            self.current_epoch_spin.setValue(self.current_epoch)
-            self.update_epoch_displays()
+        new_epochs = min(n_epochs, self.spectrogram_epochs_to_show + step)
+        if new_epochs != self.spectrogram_epochs_to_show:
+            self.spectrogram_epochs_to_show = new_epochs
+            self.spectrogram_widget.set_epochs_to_show(self.spectrogram_epochs_to_show)
+            self.spec_epochs_label.setText(f"Showing {self.spectrogram_epochs_to_show} epochs")
+            # Increase acceleration for consecutive clicks
+            self.zoom_acceleration = min(3.0, self.zoom_acceleration + 0.3)
+        else:
+            # Can't zoom more, reset acceleration
+            self.zoom_acceleration = 1
     
     def create_label_file(self):
         """Create a new CSV file for labeling."""
@@ -580,6 +910,9 @@ class EpilepsyLabelWindow(QWidget):
             # Initialize label widget with empty labels
             self.label_widget.initialize_labels(n_epochs)
             
+            # Update status indicator
+            self.update_label_status(True)
+            
             QMessageBox.information(self, "Create Success", 
                                    f"Created new label file with {n_epochs} epochs:\n{file_path}\n\n"
                                    f"All labels initialized to 0 (no seizure).")
@@ -588,6 +921,7 @@ class EpilepsyLabelWindow(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Create Error", f"Failed to create label file:\n{str(e)}")
             self.label_file = None
+            self.update_label_status(False)
             
     def import_label_file(self):
         """Import a CSV file for labels (can be empty or contain existing labels)."""
@@ -628,11 +962,14 @@ class EpilepsyLabelWindow(QWidget):
                     QMessageBox.information(self, "Import Success", 
                                            f"Imported file (no existing labels).\nReady to label {n_epochs} epochs.")
             
+            # Update status indicator
+            self.update_label_status(True)
             print(f"Label file set to: {self.label_file}")
             
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import file:\n{str(e)}")
             self.label_file = None
+            self.update_label_status(False)
     
     def save_labels(self):
         """Save current labels to the imported CSV file."""
@@ -659,4 +996,37 @@ class EpilepsyLabelWindow(QWidget):
             
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save labels:\n{str(e)}")
+    
+    def update_label_status(self, is_loaded):
+        """Update the label status indicator.
+        
+        Parameters:
+        -----------
+        is_loaded : bool
+            True if label file is loaded/imported, False if empty
+        """
+        if is_loaded:
+            self.label_status_indicator.setText("Imported")
+            self.label_status_indicator.setStyleSheet("""
+                QLabel {
+                    background-color: #388e3c;
+                    color: white;
+                    padding: 5px 15px;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 10px;
+                }
+            """)
+        else:
+            self.label_status_indicator.setText("Empty")
+            self.label_status_indicator.setStyleSheet("""
+                QLabel {
+                    background-color: #d32f2f;
+                    color: white;
+                    padding: 5px 15px;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 10px;
+                }
+            """)
 

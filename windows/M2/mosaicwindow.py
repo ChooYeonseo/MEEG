@@ -26,9 +26,9 @@ class MosaicPlotterWidget(QWidget):
         self.mosaic_relationships = mosaic_relationships or []
         self.sampling_rate = sampling_rate or 1000.0
         self.theme_colors = theme_colors or {'bg_primary': '#1a1a1a', 'fg_primary': '#ffffff'}
-        self.epoch_length = 10  # seconds
+        self.epoch_length = 1  # seconds
         self.current_epoch = 0
-        self.epochs_to_show = 5
+        self.epochs_to_show = 15
         
         # Display parameters
         self.spacing = 300  # spacing within each montage pair (µV)
