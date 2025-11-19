@@ -7,6 +7,7 @@ and efficient data loading for large EEG datasets.
 
 import numpy as np
 import sys
+import os
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                             QLabel, QLineEdit, QGroupBox, QSplitter, QTextEdit,
@@ -16,6 +17,7 @@ from PyQt6.QtGui import QDoubleValidator, QShortcut, QKeySequence
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+import pandas as pd
 
 # Add utils directory to Python path
 current_dir = Path(__file__).parent.parent
@@ -27,17 +29,12 @@ sys.path.insert(0, str(current_dir))
 from theme import preferences_manager
 
 try:
-    import sys
-    import os
     # Add utils directory to path for imports
     sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'utils'))
     from utils import read_intan
     from utils import widget
-    import pandas as pd
 except ImportError as e:
     print(f"Import error in plotting_window: {e}")
-    # Fallback imports
-    import pandas as pd
 
 
 class PlottingWindow(QWidget):

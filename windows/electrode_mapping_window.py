@@ -13,9 +13,9 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QLabel, QGroupBox, QTableWidget, QTableWidgetItem,
                             QHeaderView, QMessageBox, QComboBox, QSplitter,
                             QTextEdit, QFormLayout, QInputDialog, QListWidget,
-                            QListWidgetItem, QDialog, QFileDialog)
+                            QListWidgetItem, QDialog, QFileDialog, QGridLayout)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QPixmap
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -25,6 +25,184 @@ import matplotlib.patches as patches
 current_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(current_dir))
 from theme import preferences_manager
+
+
+class AnalysisMethodDialog(QDialog):
+    """Dialog for selecting analysis method with gallery-style buttons."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.selected_method = None
+        
+        # Get current theme
+        self.current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
+        self.load_theme_colors()
+        
+        self.init_ui()
+        
+    def load_theme_colors(self):
+        """Load colors based on the current theme."""
+        if self.current_theme == 'tokyo_night':
+            from theme import TOKYO_NIGHT_COLORS as THEME_COLORS
+            self.bg_primary = THEME_COLORS['bg_primary']
+            self.bg_secondary = THEME_COLORS['bg_secondary']
+            self.bg_tertiary = THEME_COLORS['bg_tertiary']
+            self.fg_primary = THEME_COLORS['fg_primary']
+            self.border = THEME_COLORS['border']
+            self.hover = THEME_COLORS['hover']
+            self.active = THEME_COLORS['active']
+        elif self.current_theme == 'dark':
+            from theme import DARK_COLORS as THEME_COLORS
+            self.bg_primary = THEME_COLORS['bg_primary']
+            self.bg_secondary = THEME_COLORS['bg_secondary']
+            self.bg_tertiary = THEME_COLORS['bg_tertiary']
+            self.fg_primary = THEME_COLORS['fg_primary']
+            self.border = THEME_COLORS['border']
+            self.hover = THEME_COLORS.get('accent_hover', '#707070')
+            self.active = THEME_COLORS.get('accent_pressed', '#4a4a4a')
+        else:  # normal
+            from theme import NORMAL_COLORS as THEME_COLORS
+            self.bg_primary = THEME_COLORS['bg_primary']
+            self.bg_secondary = THEME_COLORS['bg_secondary']
+            self.bg_tertiary = THEME_COLORS['bg_tertiary']
+            self.fg_primary = THEME_COLORS['fg_primary']
+            self.border = THEME_COLORS['border']
+            self.hover = THEME_COLORS.get('accent_hover', '#858585')
+            self.active = THEME_COLORS.get('accent_pressed', '#4a4a4a')
+        
+    def init_ui(self):
+        """Initialize the dialog UI with gallery-style buttons."""
+        self.setWindowTitle("Select Analysis Method")
+        self.setModal(True)
+        self.setMinimumSize(800, 350)
+        
+        layout = QVBoxLayout(self)
+        
+        # Apply dialog background
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {self.bg_primary};
+                color: {self.fg_primary};
+            }}
+        """)
+        
+        # Title
+        title_label = QLabel("Select Analysis Method")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        layout.addSpacing(20)
+        
+        # Gallery layout
+        gallery_layout = QGridLayout()
+        gallery_layout.setSpacing(20)
+        
+        # Get the asset path
+        asset_path = Path(__file__).parent / "asset" / "fig"
+        
+        # Define the three analysis methods
+        methods = [
+            ("Sleep Label", str(asset_path / "Sleep_EEG.png")),
+            ("Seizure Label", str(asset_path / "Seizure_Label.png")),
+            ("Movement Label", str(asset_path / "Movement_Prediction.png"))
+        ]
+        
+        # Create gallery buttons
+        for i, (method_name, image_path) in enumerate(methods):
+            # Create a single clickable button with image and text
+            button = QPushButton()
+            button.setMinimumSize(240, 280)
+            button.setMaximumSize(240, 280)
+            
+            # Create layout for button content
+            button_layout = QVBoxLayout(button)
+            button_layout.setContentsMargins(5, 5, 5, 5)
+            button_layout.setSpacing(10)
+            
+            # Image label inside button
+            image_label = QLabel()
+            image_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
+            image_label.setScaledContents(False)
+            
+            # Load and set the image
+            if Path(image_path).exists():
+                pixmap = QPixmap(image_path)
+                # Scale by width to fill horizontally, crop height if needed
+                scaled_pixmap = pixmap.scaledToWidth(220, Qt.TransformationMode.SmoothTransformation)
+                # Crop to height if the image is taller than 200
+                if scaled_pixmap.height() > 200:
+                    scaled_pixmap = scaled_pixmap.copy(0, 0, 220, 200)
+                image_label.setPixmap(scaled_pixmap)
+            else:
+                image_label.setText("[Image not found]")
+            
+            image_label.setMinimumHeight(200)
+            image_label.setMaximumHeight(200)
+            button_layout.addWidget(image_label)
+            
+            # Text label inside button
+            text_label = QLabel(method_name)
+            text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            text_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {self.fg_primary};
+                    font-size: 14px;
+                    font-weight: bold;
+                    background: transparent;
+                }}
+            """)
+            button_layout.addWidget(text_label)
+            
+            # Style the entire button with theme colors
+            button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {self.bg_tertiary};
+                    border: 3px solid {self.border};
+                    border-radius: 10px;
+                    padding: 5px;
+                }}
+                QPushButton:hover {{
+                    background-color: {self.hover};
+                    border: 3px solid {self.fg_primary};
+                }}
+                QPushButton:pressed {{
+                    background-color: {self.active};
+                    border: 3px solid {self.fg_primary};
+                }}
+            """)
+            button.clicked.connect(lambda checked, m=method_name: self.select_method(m))
+            
+            # Add to gallery layout
+            gallery_layout.addWidget(button, 0, i)
+        
+        layout.addLayout(gallery_layout)
+        
+        layout.addStretch()
+        
+        # Cancel button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setMinimumWidth(100)
+        cancel_button.setMinimumHeight(35)
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+    def select_method(self, method_name):
+        """Handle method selection."""
+        self.selected_method = method_name
+        self.accept()
+        
+    def get_selected_method(self):
+        """Return the selected method."""
+        return self.selected_method
 
 
 class ElectrodeVisualizationWidget(QWidget):
@@ -97,6 +275,19 @@ class ElectrodeVisualizationWidget(QWidget):
         for i, electrode in enumerate(self.electrode_positions):
             x, y = electrode['x'], electrode['y']
             number = electrode['number']
+            name = electrode.get('name', f"E{number}")
+            color = colors[i % len(colors)]
+            
+            # Draw electrode circle with larger radius
+            circle = patches.Circle((x, y), 0.4, facecolor=color, edgecolor='black', linewidth=2)
+            self.ax.add_patch(circle)
+            
+            # Add electrode name
+            self.ax.text(x, y, name, ha='center', va='center', 
+                        fontsize=5, fontweight='bold', color='white')
+            x, y = electrode['x'], electrode['y']
+            number = electrode['number']
+            name = electrode.get('name', f"E{number}")
             
             # Choose color
             color = colors[i % len(colors)]
@@ -105,8 +296,8 @@ class ElectrodeVisualizationWidget(QWidget):
             circle = patches.Circle((x, y), 0.15, facecolor=color, edgecolor='black', linewidth=2)
             self.ax.add_patch(circle)
             
-            # Add electrode number
-            self.ax.text(x, y, str(number), ha='center', va='center', 
+            # Add electrode name
+            self.ax.text(x, y, name, ha='center', va='center', 
                         fontsize=10, fontweight='bold', color='white')
     
     def update_electrodes(self, electrode_positions):
@@ -126,9 +317,11 @@ class MosaicRelationshipDialog(QDialog):
         if existing_relationships:
             for i, rel in enumerate(existing_relationships):
                 if isinstance(rel, tuple):
-                    # Old format: convert to new format with auto-generated name
+                    # Old format: convert to new format with electrode name-based name
+                    electrode_a_name = self.get_electrode_name(rel[0])
+                    electrode_b_name = self.get_electrode_name(rel[1])
                     self.relationships.append({
-                        'name': f"mosaic {i + 1}",
+                        'name': f"{electrode_a_name}-{electrode_b_name}",
                         'electrode_a': rel[0],
                         'electrode_b': rel[1]
                     })
@@ -136,6 +329,13 @@ class MosaicRelationshipDialog(QDialog):
                     # New format: keep as is
                     self.relationships.append(rel.copy())
         self.init_ui()
+    
+    def get_electrode_name(self, electrode_num):
+        """Get electrode name by number."""
+        for electrode in self.electrode_positions:
+            if electrode['number'] == electrode_num:
+                return electrode.get('name', f"E{electrode_num}")
+        return f"E{electrode_num}"
         
     def init_ui(self):
         """Initialize the dialog UI."""
@@ -213,8 +413,10 @@ class MosaicRelationshipDialog(QDialog):
             pos_b = next((e for e in self.electrode_positions if e['number'] == electrode_b), None)
             
             if pos_a and pos_b:
-                item_text = (f"{name}: Electrode {electrode_a} (X: {pos_a['x']:.2f}, Y: {pos_a['y']:.2f}) ↔ "
-                           f"Electrode {electrode_b} (X: {pos_b['x']:.2f}, Y: {pos_b['y']:.2f})")
+                name_a = pos_a.get('name', f"E{electrode_a}")
+                name_b = pos_b.get('name', f"E{electrode_b}")
+                item_text = (f"{name}: {name_a} (X: {pos_a['x']:.2f}, Y: {pos_a['y']:.2f}) ↔ "
+                           f"{name_b} (X: {pos_b['x']:.2f}, Y: {pos_b['y']:.2f})")
             else:
                 # Fallback if position data is not available
                 item_text = f"{name}: Electrode {electrode_a} ↔ Electrode {electrode_b}"
@@ -234,9 +436,10 @@ class MosaicRelationshipDialog(QDialog):
         
         for electrode in self.electrode_positions:
             number = electrode['number']
+            name = electrode.get('name', f"E{number}")
             x = electrode['x']
             y = electrode['y']
-            display_text = f"Electrode {number} (X: {x:.2f}, Y: {y:.2f})"
+            display_text = f"{name} (X: {x:.2f}, Y: {y:.2f})"
             electrode_options.append(display_text)
             electrode_map[display_text] = str(number)
         
@@ -287,8 +490,10 @@ class MosaicRelationshipDialog(QDialog):
                               f"Relationship between electrodes {electrode_a} and {electrode_b} already exists.")
             return
         
-        # Ask for relationship name
-        default_name = f"mosaic {len(self.relationships) + 1}"
+        # Ask for relationship name using electrode names
+        electrode_a_name = self.get_electrode_name(electrode_a_num)
+        electrode_b_name = self.get_electrode_name(electrode_b_num)
+        default_name = f"{electrode_a_name}-{electrode_b_name}"
         relationship_name, ok3 = QInputDialog.getText(
             self, "Name the Relationship", 
             f"Enter a name for this relationship (default: {default_name}):",
@@ -342,6 +547,7 @@ class ElectrodeMappingWindow(QWidget):
         self.directory_path = directory_path  # Directory path if freshly loaded
         self.channel_mapping = {}  # Dictionary mapping electrode number to channel name
         self.mosaic_relationships = []  # List of relationship dicts with names and electrode pairs
+        self.imported_config_file = None  # Path to imported JSON configuration file
         
         # Get current theme
         self.current_theme = preferences_manager.get_setting('theme', 'tokyo_night')
@@ -455,7 +661,7 @@ class ElectrodeMappingWindow(QWidget):
         self.mapping_table = QTableWidget()
         self.mapping_table.setColumnCount(4)
         self.mapping_table.setHorizontalHeaderLabels([
-            "Electrode #", "X (ML)", "Y (AP)", "Data Channel"
+            "Electrode", "X (ML)", "Y (AP)", "Data Channel"
         ])
         
         # Set column widths
@@ -514,8 +720,14 @@ class ElectrodeMappingWindow(QWidget):
         save_button = QPushButton("💾 Save Mapping")
         save_button.clicked.connect(self.save_mapping)
         save_button.setMinimumHeight(40)
-        save_button.setToolTip("Save current mapping to cache metadata")
+        save_button.setToolTip("Save or update current configuration file")
         file_controls.addWidget(save_button)
+        
+        save_as_button = QPushButton("💾 Save As")
+        save_as_button.clicked.connect(self.save_mapping_as)
+        save_as_button.setMinimumHeight(40)
+        save_as_button.setToolTip("Save configuration to a new file")
+        file_controls.addWidget(save_as_button)
         
         controls_layout.addLayout(file_controls)
         
@@ -530,6 +742,12 @@ class ElectrodeMappingWindow(QWidget):
         # Footer buttons
         footer_layout = QHBoxLayout()
         footer_layout.addStretch()
+        
+        analysis_method_button = QPushButton("Select Analysis Method")
+        analysis_method_button.clicked.connect(self.open_analysis_method_dialog)
+        analysis_method_button.setMinimumHeight(40)
+        analysis_method_button.setMinimumWidth(180)
+        footer_layout.addWidget(analysis_method_button)
         
         label_button = QPushButton("Data Preview")
         label_button.clicked.connect(self.open_labeling_window)
@@ -606,13 +824,14 @@ class ElectrodeMappingWindow(QWidget):
         info_text += "\nElectrode Positions:\n"
         for electrode in self.electrode_positions:
             electrode_num = electrode['number']
+            electrode_name = electrode.get('name', f"E{electrode_num}")
             status = ""
             # Check if electrode is mapped
             if electrode_num in self.channel_mapping or str(electrode_num) in self.channel_mapping:
                 channel = self.channel_mapping.get(electrode_num) or self.channel_mapping.get(str(electrode_num))
                 status = f" → {channel}"
             
-            info_text += f"Electrode {electrode_num}: "
+            info_text += f"{electrode_name}: "
             info_text += f"ML={electrode['x']:.3f}, AP={electrode['y']:.3f}{status}\n"
             
         self.electrode_info_text.setText(info_text)
@@ -629,14 +848,22 @@ class ElectrodeMappingWindow(QWidget):
             info_text += f"{i:2d}. {channel}\n"
             
         self.channels_info_text.setText(info_text)
+    
+    def get_electrode_name(self, electrode_num):
+        """Get electrode name by number."""
+        for electrode in self.electrode_positions:
+            if electrode['number'] == electrode_num:
+                return electrode.get('name', f"E{electrode_num}")
+        return f"E{electrode_num}"
         
     def populate_mapping_table(self):
         """Populate the mapping table with electrode data."""
         self.mapping_table.setRowCount(len(self.electrode_positions))
         
         for i, electrode in enumerate(self.electrode_positions):
-            # Electrode number
-            electrode_item = QTableWidgetItem(str(electrode['number']))
+            # Electrode name (with number as fallback)
+            electrode_name = electrode.get('name', f"E{electrode['number']}")
+            electrode_item = QTableWidgetItem(electrode_name)
             electrode_item.setFlags(electrode_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.mapping_table.setItem(i, 0, electrode_item)
             
@@ -678,7 +905,11 @@ class ElectrodeMappingWindow(QWidget):
             
     def on_mapping_changed(self, row, channel_name):
         """Handle mapping changes in the table."""
-        electrode_num = int(self.mapping_table.item(row, 0).text())
+        # Get electrode number from the electrode_positions data, not from the table text
+        if row < len(self.electrode_positions):
+            electrode_num = self.electrode_positions[row]['number']
+        else:
+            return  # Invalid row
         
         if channel_name:
             self.channel_mapping[electrode_num] = channel_name
@@ -710,7 +941,7 @@ class ElectrodeMappingWindow(QWidget):
         # Set labels and title
         self.electrode_visualization.ax.set_xlabel('X Coordinate (ML)')
         self.electrode_visualization.ax.set_ylabel('Y Coordinate (AP)')
-        self.electrode_visualization.ax.set_title('Electrode Positions (Green=Mapped, Red=Unmapped)')
+        self.electrode_visualization.ax.set_title('Electrode Positions \n (Green=Mapped, Red=Unmapped)')
         
         # Set coordinate limits
         self.electrode_visualization.ax.set_xlim(self.electrode_visualization.x_min, self.electrode_visualization.x_max)
@@ -733,12 +964,13 @@ class ElectrodeMappingWindow(QWidget):
                 edge_color = 'darkred'
             
             # Draw electrode circle
-            circle = patches.Circle((x, y), 0.15, facecolor=color, edgecolor=edge_color, linewidth=2)
+            circle = patches.Circle((x, y), 0.3, facecolor=color, edgecolor=edge_color, linewidth=2, alpha=0.6)
             self.electrode_visualization.ax.add_patch(circle)
             
-            # Add electrode number
-            self.electrode_visualization.ax.text(x, y, str(number), ha='center', va='center', 
-                                               fontsize=10, fontweight='bold', color='white')
+            # Add electrode name
+            name = electrode.get('name', f"E{number}")
+            self.electrode_visualization.ax.text(x, y, name, ha='center', va='center', 
+                                               fontsize=10, fontweight='bold', color='black')
         
         # Draw mosaic relationships as lines
         self.draw_mosaic_relationships()
@@ -832,6 +1064,24 @@ class ElectrodeMappingWindow(QWidget):
             if cache_file and cache_file.exists():
                 with open(cache_file, 'r') as f:
                     metadata = json.load(f)
+                
+                # Load electrode positions if they exist in cache (with names)
+                if 'electrode_positions' in metadata:
+                    # Update electrode_positions with data from cache, preserving names
+                    cached_positions = metadata['electrode_positions']
+                    # Create a mapping of number to cached electrode data
+                    cached_by_number = {e['number']: e for e in cached_positions}
+                    
+                    # Update existing electrode_positions with cached data
+                    for i, electrode in enumerate(self.electrode_positions):
+                        num = electrode['number']
+                        if num in cached_by_number:
+                            # Update with cached data, including name if it exists
+                            cached_electrode = cached_by_number[num]
+                            if 'name' in cached_electrode:
+                                self.electrode_positions[i]['name'] = cached_electrode['name']
+                    
+                    print(f"Updated electrode positions with cached names")
                     
                 # Load electrode mapping if it exists
                 if 'electrode_mapping' in metadata:
@@ -856,8 +1106,10 @@ class ElectrodeMappingWindow(QWidget):
                     for i, rel in enumerate(raw_relationships):
                         if isinstance(rel, list) and len(rel) == 2:
                             # Old tuple format (stored as list in JSON): convert to new format
+                            electrode_a_name = self.get_electrode_name(rel[0])
+                            electrode_b_name = self.get_electrode_name(rel[1])
                             self.mosaic_relationships.append({
-                                'name': f"mosaic {i + 1}",
+                                'name': f"{electrode_a_name}-{electrode_b_name}",
                                 'electrode_a': rel[0],
                                 'electrode_b': rel[1]
                             })
@@ -911,50 +1163,215 @@ class ElectrodeMappingWindow(QWidget):
             return None
         
     def save_mapping(self):
-        """Save the electrode mapping and mosaic relationships to cache metadata."""
-        if not self.channel_mapping and not self.mosaic_relationships:
-            QMessageBox.warning(self, "No Data", "No electrode mappings or mosaic relationships to save.")
+        """Save the electrode mapping and mosaic relationships to JSON configuration file."""
+        if not self.electrode_positions:
+            QMessageBox.warning(self, "No Data", "No electrode positions to save.")
             return
             
         try:
-            cache_file = self.find_cache_metadata_file()
-            if not cache_file or not cache_file.exists():
-                QMessageBox.warning(
-                    self, "Cache Not Found", 
-                    "Could not find cache metadata file. Please load data first."
-                )
-                return
-                
-            # Load existing metadata
-            with open(cache_file, 'r') as f:
-                metadata = json.load(f)
-                
-            # Add electrode mapping
-            if self.channel_mapping:
-                metadata['electrode_mapping'] = self.channel_mapping.copy()
-                
-            # Add mosaic relationships
-            if self.mosaic_relationships:
-                metadata['mosaic_relationships'] = self.mosaic_relationships.copy()
+            # Determine which file to save to
+            save_file = None
             
-            # Save updated metadata
-            with open(cache_file, 'w') as f:
-                json.dump(metadata, f, indent=2)
-                
+            if self.imported_config_file and Path(self.imported_config_file).exists():
+                # Update the existing imported JSON file
+                save_file = self.imported_config_file
+                action_text = "update"
+            else:
+                # Ask user where to save
+                default_filename = "mosaic_config.json"
+                save_file, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Save Mosaic Configuration",
+                    str(Path.home() / default_filename),
+                    "JSON Files (*.json);;All Files (*)"
+                )
+                if not save_file:
+                    return  # User cancelled
+                action_text = "save"
+            
+            # Create configuration dictionary
+            # Only include names if they exist - preserve original structure
+            electrode_positions_to_save = []
+            for electrode in self.electrode_positions:
+                electrode_copy = electrode.copy()
+                # Keep the name only if it was already in the original data
+                electrode_positions_to_save.append(electrode_copy)
+            
+            config = {
+                "electrode_positions": electrode_positions_to_save,
+                "channel_mapping": {},
+                "mosaic_relationships": self.mosaic_relationships.copy() if self.mosaic_relationships else [],
+                "metadata": {
+                    "description": "MEEG Mosaic Configuration",
+                    "version": "1.0",
+                    "total_electrodes": len(self.electrode_positions),
+                    "mapped_electrodes": len(self.channel_mapping),
+                    "relationships": len(self.mosaic_relationships) if self.mosaic_relationships else 0
+                }
+            }
+            
+            # Convert channel mapping keys to strings for JSON compatibility
+            for key, value in self.channel_mapping.items():
+                config["channel_mapping"][str(key)] = value
+            
+            # Save to file
+            with open(save_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            # Update the imported_config_file reference
+            self.imported_config_file = save_file
+            
             # Show summary
             mapped_count = len(self.channel_mapping)
             relationships_count = len(self.mosaic_relationships)
             total_electrodes = len(self.electrode_positions)
             
-            summary_text = "Successfully saved to cache metadata.\n\n"
-            summary_text += f"Mapped electrodes: {mapped_count}/{total_electrodes}\n"
-            summary_text += f"Mosaic relationships: {relationships_count}\n"
-            summary_text += f"Cache file: {cache_file.name}"
+            summary_text = f"Configuration {action_text}d successfully!\n\n"
+            summary_text += f"File: {Path(save_file).name}\n"
+            summary_text += f"Electrodes: {total_electrodes}\n"
+            summary_text += f"Mapped: {mapped_count}\n"
+            summary_text += f"Relationships: {relationships_count}"
             
-            QMessageBox.information(self, "Data Saved", summary_text)
+            QMessageBox.information(self, "Configuration Saved", summary_text)
+            print(f"Configuration saved to: {save_file}")
             
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error saving mapping: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Error saving configuration: {str(e)}")
+            print(f"Error saving configuration: {e}")
+    
+    def save_mapping_as(self):
+        """Save the electrode mapping and mosaic relationships to a new JSON file."""
+        if not self.electrode_positions:
+            QMessageBox.warning(self, "No Data", "No electrode positions to save.")
+            return
+            
+        try:
+            # Always ask user where to save (new file)
+            default_filename = "mosaic_config.json"
+            save_file, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Mosaic Configuration As",
+                str(Path.home() / default_filename),
+                "JSON Files (*.json);;All Files (*)"
+            )
+            
+            if not save_file:
+                return  # User cancelled
+            
+            # Create configuration dictionary
+            # Only include names if they exist - preserve original structure
+            electrode_positions_to_save = []
+            for electrode in self.electrode_positions:
+                electrode_copy = electrode.copy()
+                # Keep the name only if it was already in the original data
+                electrode_positions_to_save.append(electrode_copy)
+            
+            config = {
+                "electrode_positions": electrode_positions_to_save,
+                "channel_mapping": {},
+                "mosaic_relationships": self.mosaic_relationships.copy() if self.mosaic_relationships else [],
+                "metadata": {
+                    "description": "MEEG Mosaic Configuration",
+                    "version": "1.0",
+                    "total_electrodes": len(self.electrode_positions),
+                    "mapped_electrodes": len(self.channel_mapping),
+                    "relationships": len(self.mosaic_relationships) if self.mosaic_relationships else 0
+                }
+            }
+            
+            # Convert channel mapping keys to strings for JSON compatibility
+            for key, value in self.channel_mapping.items():
+                config["channel_mapping"][str(key)] = value
+            
+            # Save to file
+            with open(save_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            # Update the imported_config_file reference to the new file
+            self.imported_config_file = save_file
+            
+            # Show summary
+            mapped_count = len(self.channel_mapping)
+            relationships_count = len(self.mosaic_relationships)
+            total_electrodes = len(self.electrode_positions)
+            
+            summary_text = f"Configuration saved successfully!\n\n"
+            summary_text += f"File: {Path(save_file).name}\n"
+            summary_text += f"Electrodes: {total_electrodes}\n"
+            summary_text += f"Mapped: {mapped_count}\n"
+            summary_text += f"Relationships: {relationships_count}"
+            
+            QMessageBox.information(self, "Configuration Saved", summary_text)
+            print(f"Configuration saved to: {save_file}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error saving configuration: {str(e)}")
+            print(f"Error saving configuration: {e}")
+    
+    def open_analysis_method_dialog(self):
+        """Open the analysis method selection dialog."""
+        # Check if we have required data
+        if not self.electrode_positions:
+            QMessageBox.warning(self, "No Electrode Positions", 
+                              "Please configure electrode positions first before opening analysis windows.")
+            return
+            
+        if not self.current_data:
+            QMessageBox.warning(self, "No Data", "No data available for analysis.")
+            return
+        
+        dialog = AnalysisMethodDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            method = dialog.get_selected_method()
+            if method:
+                try:
+                    if method == "Sleep Label":
+                        from .M1.sleep_label_main import SleepLabelWindow
+                        self.analysis_window = SleepLabelWindow(
+                            electrode_positions=self.electrode_positions,
+                            current_data=self.current_data,
+                            channel_mapping=self.channel_mapping,
+                            mosaic_relationships=self.mosaic_relationships,
+                            parent=None
+                        )
+                    elif method == "Seizure Label":
+                        from .M2.epilepsy_label_main import EpilepsyLabelWindow
+                        self.analysis_window = EpilepsyLabelWindow(
+                            electrode_positions=self.electrode_positions,
+                            current_data=self.current_data,
+                            channel_mapping=self.channel_mapping,
+                            mosaic_relationships=self.mosaic_relationships,
+                            parent=None
+                        )
+                    elif method == "Movement Label":
+                        from .M3.motion_label_main import MotionLabelWindow
+                        self.analysis_window = MotionLabelWindow(
+                            electrode_positions=self.electrode_positions,
+                            current_data=self.current_data,
+                            channel_mapping=self.channel_mapping,
+                            mosaic_relationships=self.mosaic_relationships,
+                            parent=None
+                        )
+                    
+                    self.analysis_window.show()
+                    self.analysis_window.raise_()
+                    self.analysis_window.activateWindow()
+                    print(f"Opened {method} window")
+                    
+                except ImportError as e:
+                    QMessageBox.warning(
+                        self,
+                        "Module Not Found",
+                        f"The {method} module is not yet implemented.\n\nError: {str(e)}"
+                    )
+                    print(f"Import error for {method}: {e}")
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Error",
+                        f"Error opening {method} window:\n{str(e)}"
+                    )
+                    print(f"Error opening {method} window: {e}")
     
     def open_labeling_window(self):
         """Open the labeling window for data analysis (mosaic or single electrode mode)."""
@@ -993,8 +1410,15 @@ class ElectrodeMappingWindow(QWidget):
             return
         
         # Create configuration dictionary
+        # Only include names if they exist - preserve original structure
+        electrode_positions_to_save = []
+        for electrode in self.electrode_positions:
+            electrode_copy = electrode.copy()
+            # Keep the name only if it was already in the original data
+            electrode_positions_to_save.append(electrode_copy)
+        
         config = {
-            "electrode_positions": self.electrode_positions.copy(),
+            "electrode_positions": electrode_positions_to_save,
             "channel_mapping": {},
             "mosaic_relationships": self.mosaic_relationships.copy() if self.mosaic_relationships else [],
             "metadata": {
@@ -1104,8 +1528,12 @@ class ElectrodeMappingWindow(QWidget):
             if reply != QMessageBox.StandardButton.Yes:
                 return
             
-            # Apply the configuration
+            # Apply the configuration - preserve original structure
+            # Do NOT add default names - keep JSON as-is
             self.electrode_positions = electrode_positions
+            
+            # Track the imported file path
+            self.imported_config_file = file_path
             
             # Load channel mapping
             self.channel_mapping = {}
@@ -1126,8 +1554,10 @@ class ElectrodeMappingWindow(QWidget):
                 for i, rel in enumerate(raw_relationships):
                     if isinstance(rel, list) and len(rel) == 2:
                         # Old tuple format (stored as list in JSON)
+                        electrode_a_name = self.get_electrode_name(rel[0])
+                        electrode_b_name = self.get_electrode_name(rel[1])
                         self.mosaic_relationships.append({
-                            'name': f"mosaic {i + 1}",
+                            'name': f"{electrode_a_name}-{electrode_b_name}",
                             'electrode_a': rel[0],
                             'electrode_b': rel[1]
                         })

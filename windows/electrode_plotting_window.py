@@ -12,7 +12,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                             QLabel, QLineEdit, QGroupBox, QSpinBox, QFormLayout,
                             QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView,
-                            QFileDialog, QSplitter)
+                            QFileDialog, QSplitter, QCheckBox)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QBrush, QColor, QFont
 import matplotlib.pyplot as plt
@@ -112,24 +112,44 @@ class ClickableImageWidget(QWidget):
         self.add_electrode(x, y)
         self.electrode_placed.emit(x, y)
     
-    def add_electrode(self, x, y):
+    def add_electrode(self, x, y, number=None, name=None):
         """Add an electrode at the specified coordinates."""
         self.electrodes.append((x, y))
         
         # Assign color based on electrode number
-        colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+        colors = ['black']#['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
         color = colors[len(self.electrodes) % len(colors)]
         self.electrode_colors.append(color)
         
         # Draw the electrode
-        circle = patches.Circle((x, y), 0.1, facecolor=color, edgecolor='black', linewidth=2)
+        circle = patches.Circle((x, y), 0.4, facecolor=color, edgecolor='black', linewidth=2)
         self.ax.add_patch(circle)
         
-        # Add electrode number
-        self.ax.text(x, y, str(len(self.electrodes)), ha='center', va='center', 
+        # Add electrode label based on display preferences
+        label_text = self.get_electrode_label(number or len(self.electrodes), name)
+        self.ax.text(x, y, label_text, ha='center', va='center', 
                     fontsize=8, fontweight='bold', color='white')
         
         self.canvas.draw()
+    
+    def get_electrode_label(self, number, name):
+        """Generate electrode label based on display preferences."""
+        if not hasattr(self, 'parent_window'):
+            return str(number)
+        
+        show_number = getattr(self.parent_window, 'show_number', True)
+        show_name = getattr(self.parent_window, 'show_name', False)
+        
+        if show_number and show_name and name:
+            return f"{number}\n{name}"
+        elif show_name and name:
+            return name
+        else:
+            return str(number)
+    
+    def set_parent_window(self, parent):
+        """Set reference to parent window for display preferences."""
+        self.parent_window = parent
     
     def clear_electrodes(self):
         """Clear all placed electrodes."""
@@ -144,12 +164,17 @@ class ClickableImageWidget(QWidget):
             self.electrode_colors.pop()
             self.load_and_display_image()
             # Redraw all remaining electrodes
-            for i, (x, y) in enumerate(self.electrodes):
-                circle = patches.Circle((x, y), 0.1, facecolor=self.electrode_colors[i], 
-                                      edgecolor='black', linewidth=2)
-                self.ax.add_patch(circle)
-                self.ax.text(x, y, str(i+1), ha='center', va='center', 
-                           fontsize=8, fontweight='bold', color='white')
+            if hasattr(self, 'parent_window') and hasattr(self.parent_window, 'electrodes_data'):
+                for i, electrode_data in enumerate(self.parent_window.electrodes_data):
+                    x, y = electrode_data['x'], electrode_data['y']
+                    number = electrode_data.get('number', i+1)
+                    name = electrode_data.get('name', '')
+                    circle = patches.Circle((x, y), 0.4, facecolor=self.electrode_colors[i], 
+                                          edgecolor='black', linewidth=2)
+                    self.ax.add_patch(circle)
+                    label_text = self.get_electrode_label(number, name)
+                    self.ax.text(x, y, label_text, ha='center', va='center', 
+                               fontsize=8, fontweight='bold', color='white')
             self.canvas.draw()
 
 
@@ -193,17 +218,45 @@ class ElectrodePlottingWindow(QWidget):
         
         # Image controls
         image_controls = QGroupBox("Image Controls")
-        controls_layout = QHBoxLayout(image_controls)
+        controls_layout = QVBoxLayout(image_controls)
         
+        # Button row
+        button_row = QHBoxLayout()
         clear_button = QPushButton("Clear All Electrodes")
         clear_button.clicked.connect(self.clear_all_electrodes)
-        controls_layout.addWidget(clear_button)
+        button_row.addWidget(clear_button)
         
         remove_last_button = QPushButton("Remove Last")
         remove_last_button.clicked.connect(self.remove_last_electrode)
-        controls_layout.addWidget(remove_last_button)
+        button_row.addWidget(remove_last_button)
+        controls_layout.addLayout(button_row)
+        
+        # Display options row
+        display_row = QHBoxLayout()
+        display_label = QLabel("Display on electrodes:")
+        display_row.addWidget(display_label)
+        
+        self.show_number_checkbox = QCheckBox("Number")
+        self.show_number_checkbox.setChecked(True)
+        self.show_number_checkbox.stateChanged.connect(self.on_display_option_changed)
+        display_row.addWidget(self.show_number_checkbox)
+        
+        self.show_name_checkbox = QCheckBox("Name")
+        self.show_name_checkbox.setChecked(False)
+        self.show_name_checkbox.stateChanged.connect(self.on_display_option_changed)
+        display_row.addWidget(self.show_name_checkbox)
+        
+        display_row.addStretch()
+        controls_layout.addLayout(display_row)
         
         left_layout.addWidget(image_controls)
+        
+        # Set parent window reference for image widget
+        self.image_widget.set_parent_window(self)
+        
+        # Initialize display preferences
+        self.show_number = True
+        self.show_name = False
         
         splitter.addWidget(left_panel)
         
@@ -243,8 +296,8 @@ class ElectrodePlottingWindow(QWidget):
         table_layout = QVBoxLayout(table_group)
         
         self.electrodes_table = QTableWidget()
-        self.electrodes_table.setColumnCount(3)
-        self.electrodes_table.setHorizontalHeaderLabels(["Electrode #", "ML", "AP"])
+        self.electrodes_table.setColumnCount(4)
+        self.electrodes_table.setHorizontalHeaderLabels(["Number", "Name", "ML", "AP"])
         
         # Connect cell change signal to update plot
         self.electrodes_table.cellChanged.connect(self.on_table_cell_changed)
@@ -332,6 +385,14 @@ class ElectrodePlottingWindow(QWidget):
         if hasattr(self, 'electrodes_table'):
             self.electrodes_table.setStyleSheet(THEME_STYLES.get('table', ''))
     
+    def on_display_option_changed(self):
+        """Handle changes to display options (number/name checkboxes)."""
+        self.show_number = self.show_number_checkbox.isChecked()
+        self.show_name = self.show_name_checkbox.isChecked()
+        # Rebuild electrodes with new display settings
+        if self.electrodes_data:  # Only rebuild if there are electrodes
+            self.rebuild_image_electrodes()
+    
     def on_electrode_placed(self, x, y):
         """Handle electrode placement from image click."""
         self.add_electrode_to_data(x, y)
@@ -361,10 +422,12 @@ class ElectrodePlottingWindow(QWidget):
         except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric coordinates")
     
-    def add_electrode_to_data(self, x, y):
+    def add_electrode_to_data(self, x, y, name=None):
         """Add electrode to the data list and update table."""
+        electrode_num = len(self.electrodes_data) + 1
         electrode_data = {
-            'number': len(self.electrodes_data) + 1,
+            'number': electrode_num,
+            'name': name if name else f"E{electrode_num}",
             'x': round(x, 3),
             'y': round(y, 3)
         }
@@ -434,7 +497,12 @@ class ElectrodePlottingWindow(QWidget):
         """Rebuild all electrodes on the image."""
         self.image_widget.clear_electrodes()
         for electrode in self.electrodes_data:
-            self.image_widget.add_electrode(electrode['x'], electrode['y'])
+            self.image_widget.add_electrode(
+                electrode['x'], 
+                electrode['y'],
+                number=electrode.get('number'),
+                name=electrode.get('name', '')
+            )
     
     def update_electrodes_table(self):
         """Update the electrodes table with current data."""
@@ -449,17 +517,21 @@ class ElectrodePlottingWindow(QWidget):
             number_item.setFlags(number_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.electrodes_table.setItem(i, 0, number_item)
             
+            # Name (editable)
+            name_item = QTableWidgetItem(electrode.get('name', f"E{electrode['number']}"))
+            self.electrodes_table.setItem(i, 1, name_item)
+            
             # X and Y coordinates (editable)
-            self.electrodes_table.setItem(i, 1, QTableWidgetItem(str(electrode['x'])))
-            self.electrodes_table.setItem(i, 2, QTableWidgetItem(str(electrode['y'])))
+            self.electrodes_table.setItem(i, 2, QTableWidgetItem(str(electrode['x'])))
+            self.electrodes_table.setItem(i, 3, QTableWidgetItem(str(electrode['y'])))
         
         # Reconnect signal
         self.electrodes_table.cellChanged.connect(self.on_table_cell_changed)
     
     def on_table_cell_changed(self, row, column):
         """Handle changes to table cells and update the plot."""
-        # Only process changes to X (column 1) or Y (column 2) coordinates
-        if column not in [1, 2]:
+        # Process changes to Name (column 1), X (column 2) or Y (column 3)
+        if column not in [1, 2, 3]:
             return
         
         try:
@@ -468,29 +540,40 @@ class ElectrodePlottingWindow(QWidget):
             if item is None:
                 return
             
-            new_value = float(item.text())
-            
-            # Validate coordinate ranges
-            if column == 1:  # X coordinate (ML)
-                if not (-5 <= new_value <= 5):
-                    QMessageBox.warning(self, "Invalid Coordinate", "ML coordinate must be between -5 and 5")
-                    # Restore old value
-                    item.setText(str(self.electrodes_data[row]['x']))
-                    return
-                self.electrodes_data[row]['x'] = round(new_value, 3)
-            else:  # column == 2, Y coordinate (AP)
-                if not (-8 <= new_value <= 5):
-                    QMessageBox.warning(self, "Invalid Coordinate", "AP coordinate must be between -8 and 5")
-                    # Restore old value
-                    item.setText(str(self.electrodes_data[row]['y']))
-                    return
-                self.electrodes_data[row]['y'] = round(new_value, 3)
-            
-            # Update the item with rounded value
-            item.setText(str(round(new_value, 3)))
-            
-            # Rebuild the plot with updated coordinates
-            self.rebuild_image_electrodes()
+            if column == 1:  # Name field
+                new_name = item.text().strip()
+                if not new_name:
+                    # Don't allow empty names, restore default
+                    new_name = f"E{self.electrodes_data[row]['number']}"
+                    item.setText(new_name)
+                self.electrodes_data[row]['name'] = new_name
+                # Don't rebuild plot for name changes - only update data
+                # Plot will be rebuilt when save is pressed or display options change
+            else:
+                # Coordinate fields
+                new_value = float(item.text())
+                
+                # Validate coordinate ranges
+                if column == 2:  # X coordinate (ML)
+                    if not (-5 <= new_value <= 5):
+                        QMessageBox.warning(self, "Invalid Coordinate", "ML coordinate must be between -5 and 5")
+                        # Restore old value
+                        item.setText(str(self.electrodes_data[row]['x']))
+                        return
+                    self.electrodes_data[row]['x'] = round(new_value, 3)
+                else:  # column == 3, Y coordinate (AP)
+                    if not (-8 <= new_value <= 5):
+                        QMessageBox.warning(self, "Invalid Coordinate", "AP coordinate must be between -8 and 5")
+                        # Restore old value
+                        item.setText(str(self.electrodes_data[row]['y']))
+                        return
+                    self.electrodes_data[row]['y'] = round(new_value, 3)
+                
+                # Update the item with rounded value
+                item.setText(str(round(new_value, 3)))
+                
+                # Rebuild the plot with updated coordinates
+                self.rebuild_image_electrodes()
             
             # Reset button styles since electrodes have been modified
             self.reset_button_styles()
@@ -501,9 +584,9 @@ class ElectrodePlottingWindow(QWidget):
         except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid numeric value")
             # Restore old value
-            if column == 1:
+            if column == 2:
                 item.setText(str(self.electrodes_data[row]['x']))
-            else:
+            elif column == 3:
                 item.setText(str(self.electrodes_data[row]['y']))
     
     def update_electrode_count(self):
@@ -515,6 +598,10 @@ class ElectrodePlottingWindow(QWidget):
         if not self.electrodes_data:
             QMessageBox.warning(self, "No Data", "No electrodes to save")
             return
+        
+        # Rebuild image to reflect any name changes before saving
+        if self.show_name:
+            self.rebuild_image_electrodes()
         
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Electrode Positions", "", "JSON Files (*.json);;All Files (*)"
@@ -558,8 +645,9 @@ class ElectrodePlottingWindow(QWidget):
                 for electrode in loaded_data:
                     if isinstance(electrode, dict) and 'x' in electrode and 'y' in electrode:
                         x, y = electrode['x'], electrode['y']
-                        self.image_widget.add_electrode(x, y)
-                        self.add_electrode_to_data(x, y)
+                        name = electrode.get('name', f"E{electrode.get('number', len(self.electrodes_data) + 1)}")
+                        self.image_widget.add_electrode(x, y, number=electrode.get('number'), name=name)
+                        self.add_electrode_to_data(x, y, name=name)
                 
                 # Change button style to indicate successful loading using theme colors
                 success_color = self.theme_colors.get('accent_green', '#4CAF50')
