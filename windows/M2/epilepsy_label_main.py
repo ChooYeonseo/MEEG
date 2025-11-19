@@ -42,9 +42,9 @@ class EpilepsyLabelWindow(QWidget):
         self.df, self.mosaic, self.sampling_rate = self.extract_eeg_data()
         
         # Initialize epoch parameters
-        self.epoch_length = 10  # seconds
+        self.epoch_length = 1  # seconds
         self.current_epoch = 0
-        self.epochs_to_show = 5  # Display 5 epochs at once
+        self.epochs_to_show = 15  # Display 5 epochs at once
         self.label_file = None  # CSV file for labels
         
         self.init_ui()
