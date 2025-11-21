@@ -48,7 +48,7 @@ class FixedScaleDialog(QDialog):
         # Max power spinbox
         self.max_power_spin = QDoubleSpinBox()
         self.max_power_spin.setRange(-1000.0, 1000.0)
-        self.max_power_spin.setValue(self.current_max if self.current_max is not None else 10.0)
+        self.max_power_spin.setValue(self.current_max if self.current_max is not None else 200.0)
         self.max_power_spin.setSuffix(" μV²/Hz")
         self.max_power_spin.setDecimals(2)
         layout.addRow("Max Power:", self.max_power_spin)
@@ -699,7 +699,7 @@ class TopographyWidget(QWidget):
                        ha='center', va='center', fontsize=9, fontweight='bold', 
                        color='white', zorder=11, 
                        bbox=dict(boxstyle='round,pad=0.3', 
-                               facecolor='black', alpha=0.7,
+                               facecolor=self.theme_colors['bg_primary'], alpha=0.7,
                                edgecolor='white', linewidth=1))
         
         # Set limits and title

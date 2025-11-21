@@ -188,6 +188,12 @@ class MosaicPlotterWidget(QWidget):
         self.ax.set_ylabel('Montage', fontsize=10, color='black')
         self.ax.set_xlim(start_epoch * self.epoch_length, end_epoch * self.epoch_length)
         
+        # Set x-ticks at every 1 second
+        x_start = start_epoch * self.epoch_length
+        x_end = end_epoch * self.epoch_length
+        x_ticks = np.arange(np.ceil(x_start), x_end + 1, 1)
+        self.ax.set_xticks(x_ticks)
+        
         if y_ticks:
             y_min = min(y_ticks) - self.limit * 1.2
             y_max = max(y_ticks) + self.limit * 1.2
