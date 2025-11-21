@@ -190,6 +190,48 @@ class EpilepsyLabelWindow(QWidget):
         self.topo_enabled = True  # Topography updates enabled by default
         
         self.init_ui()
+    
+    def show_message_box(self, icon, title, text):
+        """Show a styled message box with visible buttons.
+        
+        Args:
+            icon: QMessageBox.Icon (Information, Warning, Critical)
+            title: Dialog title
+            text: Message text
+        """
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(icon)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(text)
+        
+        # Get theme colors for button styling - match secondary button style
+        bg_color = self.theme_colors.get('bg_tertiary', '#414868')
+        fg_color = self.theme_colors.get('fg_primary', '#c0caf5')
+        border_color = self.theme_colors.get('border', '#414868')
+        hover_bg = self.theme_colors.get('hover', '#565f89')
+        hover_border = self.theme_colors.get('accent_blue', '#7aa2f7')  # Accent on hover only
+        
+        # Style the message box buttons to match theme secondary button style
+        msg_box.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {bg_color};
+                color: {fg_color};
+                border: 1px solid {border_color};
+                padding: 8px 16px;
+                border-radius: 6px;
+                min-width: 80px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+                border-color: {hover_border};
+            }}
+            QPushButton:pressed {{
+                background-color: {self.theme_colors.get('active', '#565f89')};
+            }}
+        """)
+        
+        msg_box.exec()
         
     def extract_eeg_data(self) -> Tuple[pd.DataFrame, list, float]:
         """
@@ -511,12 +553,13 @@ class EpilepsyLabelWindow(QWidget):
         n_epochs = self.get_n_epochs()
         self.label_widget.initialize_labels(n_epochs)
         self.label_widget.set_epochs_to_show(self.label_epochs_to_show)
+        self.label_widget.set_mosaic_epochs_to_show(self.mosaic_epochs_to_show)
         right_layout.addWidget(self.label_widget, 20)  # 20% stretch
         
         main_splitter.addWidget(right_widget)
         
-        # Set main splitter sizes (30-70)
-        main_splitter.setSizes([300, 700])
+        # Set main splitter sizes (33-67, i.e., 1/3 - 2/3)
+        main_splitter.setSizes([333, 667])
         
         main_layout.addWidget(main_splitter)
         
@@ -545,12 +588,23 @@ class EpilepsyLabelWindow(QWidget):
         duration_sec = num_samples / self.sampling_rate if self.sampling_rate and self.sampling_rate > 0 else 0
         
         summary_group = QGroupBox("Data Summary")
-        summary_layout = QFormLayout(summary_group)
-        summary_layout.addRow("Electrodes:", QLabel(str(len(self.electrode_positions))))
-        summary_layout.addRow("Sampling Rate:", QLabel(f"{self.sampling_rate:.0f} Hz"))
-        summary_layout.addRow("Duration:", QLabel(f"{duration_sec:.1f} sec"))
-        summary_layout.addRow("Epoch Length:", QLabel(f"{self.epoch_length:.1f} sec"))
-        summary_layout.addRow("Total Epochs:", QLabel(str(n_epochs)))
+        summary_layout = QVBoxLayout(summary_group)
+        
+        # First row: Electrodes, Sampling Rate, Duration
+        summary_text_1 = (f"Electrodes: {len(self.electrode_positions)} | "
+                       f"Sampling Rate: {self.sampling_rate:.0f} Hz | "
+                       f"Duration: {duration_sec:.1f} sec")
+        summary_label_1 = QLabel(summary_text_1)
+        summary_label_1.setWordWrap(True)
+        summary_layout.addWidget(summary_label_1)
+        
+        # Second row: Epoch Length, Total Epochs
+        summary_text_2 = (f"Epoch Length: {self.epoch_length:.1f} sec | "
+                       f"Total Epochs: {n_epochs}")
+        summary_label_2 = QLabel(summary_text_2)
+        summary_label_2.setWordWrap(True)
+        summary_layout.addWidget(summary_label_2)
+        
         layout.addWidget(summary_group)
         
         # Topography toggle
@@ -712,12 +766,20 @@ class EpilepsyLabelWindow(QWidget):
         
         return epoch_data
         
-    def update_epoch_displays(self):
-        """Update all widgets to show current epoch."""
+    def update_epoch_displays(self, update_label_view=True):
+        """Update all widgets to show current epoch.
+        
+        Args:
+            update_label_view: If False, skip updating label widget view
+                             (used when label change originates from label widget)
+        """
         # Update all widgets with the same current epoch
         self.mosaic_plotter.set_epoch(self.current_epoch)
         self.spectrogram_widget.set_epoch(self.current_epoch)
-        self.label_widget.set_epoch(self.current_epoch)
+        
+        # Only update label view if requested (skip when change comes from label widget)
+        if update_label_view:
+            self.label_widget.set_epoch(self.current_epoch)
         
         # Only update topography if enabled
         if self.topo_enabled:
@@ -745,14 +807,16 @@ class EpilepsyLabelWindow(QWidget):
         with the current epoch shown in the label widget.
         """
         print(f"Epoch {epoch_idx} - Racine score {score}")
-        # Sync current epoch and update all displays
+        # Sync current epoch and update displays (but skip label view update to prevent auto-shift)
         self.current_epoch = epoch_idx
-        self.update_epoch_displays()
+        self.update_epoch_displays(update_label_view=False)
     
     def on_mosaic_epochs_changed(self, value):
         """Handle mosaic epochs to show change."""
         self.mosaic_epochs_to_show = int(value)
         self.mosaic_plotter.set_epochs_to_show(self.mosaic_epochs_to_show)
+        # Also update label widget for keyboard navigation
+        self.label_widget.set_mosaic_epochs_to_show(self.mosaic_epochs_to_show)
         
     def on_label_epochs_changed(self, value):
         """Handle label epochs to show change."""
@@ -912,13 +976,13 @@ class EpilepsyLabelWindow(QWidget):
             # Update status indicator
             self.update_label_status(True)
             
-            QMessageBox.information(self, "Create Success", 
+            self.show_message_box(QMessageBox.Icon.Information, "Create Success", 
                                    f"Created new label file with {n_epochs} epochs:\n{file_path}\n\n"
                                    f"All labels initialized to 0 (no seizure).")
             print(f"Created label file: {self.label_file}")
             
         except Exception as e:
-            QMessageBox.critical(self, "Create Error", f"Failed to create label file:\n{str(e)}")
+            self.show_message_box(QMessageBox.Icon.Critical, "Create Error", f"Failed to create label file:\n{str(e)}")
             self.label_file = None
             self.update_label_status(False)
             
@@ -946,19 +1010,19 @@ class EpilepsyLabelWindow(QWidget):
                     
                     if len(labels) == n_epochs:
                         self.label_widget.set_labels(labels)
-                        QMessageBox.information(self, "Import Success", 
+                        self.show_message_box(QMessageBox.Icon.Information, "Import Success", 
                                                f"Loaded {len(labels)} existing labels from file.")
                     else:
                         # Initialize with current labels
                         self.label_widget.initialize_labels(n_epochs)
-                        QMessageBox.warning(self, "Label Count Mismatch", 
+                        self.show_message_box(QMessageBox.Icon.Warning, "Label Count Mismatch", 
                                            f"File has {len(labels)} labels but data has {n_epochs} epochs.\n"
                                            f"Initialized with empty labels instead.")
                 else:
                     # CSV exists but no label column - initialize empty labels
                     n_epochs = self.get_n_epochs()
                     self.label_widget.initialize_labels(n_epochs)
-                    QMessageBox.information(self, "Import Success", 
+                    self.show_message_box(QMessageBox.Icon.Information, "Import Success", 
                                            f"Imported file (no existing labels).\nReady to label {n_epochs} epochs.")
             
             # Update status indicator
@@ -966,14 +1030,14 @@ class EpilepsyLabelWindow(QWidget):
             print(f"Label file set to: {self.label_file}")
             
         except Exception as e:
-            QMessageBox.critical(self, "Import Error", f"Failed to import file:\n{str(e)}")
+            self.show_message_box(QMessageBox.Icon.Critical, "Import Error", f"Failed to import file:\n{str(e)}")
             self.label_file = None
             self.update_label_status(False)
     
     def save_labels(self):
         """Save current labels to the imported CSV file."""
         if not self.label_file:
-            QMessageBox.warning(self, "No Label File", 
+            self.show_message_box(QMessageBox.Icon.Warning, "No Label File", 
                                "Please import a label file first using 'Import Label File' button.")
             return
         
@@ -989,12 +1053,12 @@ class EpilepsyLabelWindow(QWidget):
             
             df.to_csv(self.label_file, index=False)
             
-            QMessageBox.information(self, "Save Success", 
+            self.show_message_box(QMessageBox.Icon.Information, "Save Success", 
                                    f"Saved {n_epochs} labels to:\n{self.label_file}")
             print(f"Labels saved to: {self.label_file}")
             
         except Exception as e:
-            QMessageBox.critical(self, "Save Error", f"Failed to save labels:\n{str(e)}")
+            self.show_message_box(QMessageBox.Icon.Critical, "Save Error", f"Failed to save labels:\n{str(e)}")
     
     def update_label_status(self, is_loaded):
         """Update the label status indicator.

@@ -43,15 +43,6 @@ class SpectrogramWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         
-        # Title
-        title_label = QLabel("Power Spectrogram (2Hz bins per epoch)")
-        title_font = QFont()
-        title_font.setPointSize(10)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title_label)
-        
         # Create matplotlib figure
         self.figure = Figure(figsize=(12, 2), facecolor=self.theme_colors['bg_primary'],
                            edgecolor=self.theme_colors['bg_primary'])
@@ -157,7 +148,7 @@ class SpectrogramWidget(QWidget):
             self.last_computed_vmin = self.vmin
             self.last_computed_vmax = self.vmax
         
-        # Highlight current epoch
+        # Highlight current epoch with vertical lines
         self.ax.axvline(self.current_epoch, color='white', linewidth=2, linestyle='-', alpha=0.8)
         self.ax.axvline(self.current_epoch + 1, color='white', linewidth=2, linestyle='-', alpha=0.8)
         
@@ -165,8 +156,8 @@ class SpectrogramWidget(QWidget):
         self.ax.set_xlabel('Epoch', fontsize=9, color=self.theme_colors['fg_primary'])
         self.ax.set_ylabel('Frequency (Hz)', fontsize=9, color=self.theme_colors['fg_primary'])
         
-        # Set y-axis ticks at 2 Hz intervals
-        self.ax.set_yticks(self.freq_bins)
+        # Set y-axis ticks at 5 Hz intervals (0, 5, 10, 15, 20, 25, 30)
+        self.ax.set_yticks([0, 5, 10, 15, 20, 25, 30])
         
         self.ax.tick_params(colors=self.theme_colors['fg_primary'], labelsize=8)
         self.ax.spines['bottom'].set_color(self.theme_colors['fg_primary'])
@@ -175,6 +166,14 @@ class SpectrogramWidget(QWidget):
         self.ax.spines['right'].set_color(self.theme_colors['fg_primary'])
         
         self.figure.tight_layout()
+        
+        # Add diamond marker above the plot after tight_layout
+        # This ensures it's positioned correctly relative to the axis
+        epoch_center = self.current_epoch + 0.5
+        self.ax.plot(epoch_center, 31.5, marker='D', markersize=10, 
+                    color='yellow', markeredgecolor='white', markeredgewidth=2,
+                    clip_on=False, zorder=10)
+        
         self.canvas.draw()
         
     def get_n_epochs(self):
@@ -246,6 +245,7 @@ class LabelWidget(QWidget):
         self.labels = np.array([])  # 0-8 Racine scores
         self.current_epoch = 0
         self.epochs_to_show = 5
+        self.mosaic_epochs_to_show = 15  # For < > key navigation
         
         # Color scheme: green for 0, red gradient for 1-8
         self.colors = self.generate_colors()
@@ -301,6 +301,8 @@ class LabelWidget(QWidget):
         if event.inaxes == self.ax and event.xdata is not None:
             clicked_epoch = int(np.clip(event.xdata, 0, self.n_epochs - 1))
             self.current_epoch = clicked_epoch
+            # Emit signal to sync all plots
+            self.label_changed.emit(self.current_epoch, int(self.labels[self.current_epoch]))
             self.update_plot()
         # Set focus to this widget so keyboard events work
         self.setFocus()
@@ -315,11 +317,9 @@ class LabelWidget(QWidget):
             if score <= 8 and 0 <= self.current_epoch < self.n_epochs:
                 self.labels[self.current_epoch] = score
                 self.label_changed.emit(self.current_epoch, score)
-                # Move to next epoch
+                # Move to next epoch without shifting view
                 if self.current_epoch < self.n_epochs - 1:
                     self.current_epoch += 1
-                    # Emit signal to sync all plots to new epoch
-                    self.label_changed.emit(self.current_epoch, int(self.labels[self.current_epoch]))
                 self.update_plot()
         # Handle arrow keys for navigation
         elif key == Qt.Key.Key_Left and self.current_epoch > 0:
@@ -332,6 +332,23 @@ class LabelWidget(QWidget):
             # Emit signal to sync all plots
             self.label_changed.emit(self.current_epoch, int(self.labels[self.current_epoch]))
             self.update_plot()
+        # Handle < and > keys for full plot shift
+        elif key == Qt.Key.Key_Less or key == Qt.Key.Key_Comma:  # < key (Shift+,)
+            # Shift backward by mosaic plot width (mosaic_epochs_to_show)
+            new_epoch = max(0, self.current_epoch - self.mosaic_epochs_to_show)
+            if new_epoch != self.current_epoch:
+                self.current_epoch = new_epoch
+                # Emit signal to sync all plots
+                self.label_changed.emit(self.current_epoch, int(self.labels[self.current_epoch]))
+                self.update_plot()
+        elif key == Qt.Key.Key_Greater or key == Qt.Key.Key_Period:  # > key (Shift+.)
+            # Shift forward by mosaic plot width (mosaic_epochs_to_show)
+            new_epoch = min(self.n_epochs - 1, self.current_epoch + self.mosaic_epochs_to_show)
+            if new_epoch != self.current_epoch:
+                self.current_epoch = new_epoch
+                # Emit signal to sync all plots
+                self.label_changed.emit(self.current_epoch, int(self.labels[self.current_epoch]))
+                self.update_plot()
         else:
             # Let parent handle other keys
             super().keyPressEvent(event)
@@ -377,6 +394,11 @@ class LabelWidget(QWidget):
         self.ax.set_ylabel('Racine Score', fontsize=9, color=self.theme_colors['fg_primary'])
         self.ax.set_yticks([0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5])
         self.ax.set_yticklabels(['0', '1', '2', '3', '4', '5', '6', '7', '8'], color=self.theme_colors['fg_primary'])
+        
+        # Set x-axis ticks at every epoch (increment of 1)
+        x_ticks = np.arange(start_epoch, end_epoch + 1, 1)
+        self.ax.set_xticks(x_ticks)
+        
         self.ax.set_xlim(start_epoch, end_epoch)
         self.ax.set_ylim(0, 9)
         self.ax.tick_params(colors=self.theme_colors['fg_primary'], labelsize=8)
@@ -397,6 +419,10 @@ class LabelWidget(QWidget):
         """Set number of epochs to display."""
         self.epochs_to_show = max(1, n_epochs)
         self.update_plot()
+    
+    def set_mosaic_epochs_to_show(self, n_epochs):
+        """Set number of mosaic epochs for keyboard navigation."""
+        self.mosaic_epochs_to_show = max(1, n_epochs)
         
     def initialize_labels(self, n_epochs):
         """Initialize label array with zeros."""

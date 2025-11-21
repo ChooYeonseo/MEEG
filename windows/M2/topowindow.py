@@ -23,6 +23,50 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 
+class FixedScaleDialog(QDialog):
+    """Dialog for setting fixed power scale."""
+    
+    def __init__(self, current_min=None, current_max=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Fixed Power Scale")
+        self.current_min = current_min
+        self.current_max = current_max
+        self.init_ui()
+        
+    def init_ui(self):
+        """Initialize the dialog UI."""
+        layout = QFormLayout(self)
+        
+        # Min power spinbox
+        self.min_power_spin = QDoubleSpinBox()
+        self.min_power_spin.setRange(-1000.0, 1000.0)
+        self.min_power_spin.setValue(self.current_min if self.current_min is not None else 0.0)
+        self.min_power_spin.setSuffix(" μV²/Hz")
+        self.min_power_spin.setDecimals(2)
+        layout.addRow("Min Power:", self.min_power_spin)
+        
+        # Max power spinbox
+        self.max_power_spin = QDoubleSpinBox()
+        self.max_power_spin.setRange(-1000.0, 1000.0)
+        self.max_power_spin.setValue(self.current_max if self.current_max is not None else 10.0)
+        self.max_power_spin.setSuffix(" μV²/Hz")
+        self.max_power_spin.setDecimals(2)
+        layout.addRow("Max Power:", self.max_power_spin)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | 
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addRow(button_box)
+        
+    def get_scale_range(self):
+        """Get the selected scale range."""
+        return (self.min_power_spin.value(), self.max_power_spin.value())
+
+
 class CustomFrequencyDialog(QDialog):
     """Dialog for entering custom frequency range."""
     
@@ -89,6 +133,11 @@ class TopographyWidget(QWidget):
         # Current frequency band
         self.current_freq_band = (5, 15)  # Default to Alpha-like range
         
+        # Fixed scale settings
+        self.fixed_scale_enabled = False
+        self.fixed_scale_min = None
+        self.fixed_scale_max = None
+        
         # Cache for boundary electrodes (computed once)
         self._cached_boundary = None
         
@@ -127,6 +176,14 @@ class TopographyWidget(QWidget):
         control_layout = QHBoxLayout()
         control_layout.setSpacing(5)
         
+        # Fixed Scale button
+        self.fixed_scale_btn = QPushButton("Fixed Scale")
+        self.fixed_scale_btn.setCheckable(True)
+        self.fixed_scale_btn.setChecked(False)
+        self.fixed_scale_btn.clicked.connect(self.on_fixed_scale_clicked)
+        self.fixed_scale_btn.setStyleSheet(f"color: {self.theme_colors['fg_primary']};")
+        control_layout.addWidget(self.fixed_scale_btn)
+        
         # Create radio buttons for predefined bands
         self.band_group = QButtonGroup(self)
         self.band_buttons = {}  # Store buttons for styling
@@ -157,12 +214,23 @@ class TopographyWidget(QWidget):
         control_layout.addStretch()
         layout.addLayout(control_layout)
         
-        # Create matplotlib figure
-        self.figure = Figure(figsize=(6, 6), facecolor=self.theme_colors['bg_primary'])
+        # Create matplotlib figures - main plot and colorbar as separate images
+        plot_colorbar_layout = QHBoxLayout()
+        plot_colorbar_layout.setSpacing(5)
+        
+        # Main topography plot
+        self.figure = Figure(figsize=(5, 5), facecolor=self.theme_colors['bg_primary'])
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111)
+        plot_colorbar_layout.addWidget(self.canvas, stretch=8)
         
-        layout.addWidget(self.canvas)
+        # Colorbar as separate figure - wider to show text
+        self.colorbar_figure = Figure(figsize=(1.2, 5), facecolor=self.theme_colors['bg_primary'])
+        self.colorbar_canvas = FigureCanvas(self.colorbar_figure)
+        self.colorbar_ax = self.colorbar_figure.add_subplot(111)
+        plot_colorbar_layout.addWidget(self.colorbar_canvas, stretch=2)
+        
+        layout.addLayout(plot_colorbar_layout)
         
         # Initialize the plot
         self.setup_topography_plot()
@@ -208,6 +276,35 @@ class TopographyWidget(QWidget):
             self._highlight_selected_button(self.custom_radio)
             self.update_topography()
     
+    def on_fixed_scale_clicked(self, checked):
+        """Handle fixed scale button toggle."""
+        if checked:
+            # Show dialog to set scale range
+            dialog = FixedScaleDialog(self.fixed_scale_min, self.fixed_scale_max, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.fixed_scale_min, self.fixed_scale_max = dialog.get_scale_range()
+                self.fixed_scale_enabled = True
+                self.fixed_scale_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: #4a6fa5;
+                        color: white;
+                        padding: 5px 10px;
+                        border-radius: 3px;
+                        font-weight: bold;
+                    }}
+                """)
+                print(f"Fixed scale enabled: {self.fixed_scale_min} to {self.fixed_scale_max} μV²/Hz")
+                self.update_topography()
+            else:
+                # User cancelled, uncheck the button
+                self.fixed_scale_btn.setChecked(False)
+        else:
+            # Disable fixed scale
+            self.fixed_scale_enabled = False
+            self.fixed_scale_btn.setStyleSheet(f"color: {self.theme_colors['fg_primary']};")
+            print("Fixed scale disabled - using auto scale")
+            self.update_topography()
+    
     def setup_topography_plot(self):
         """Setup the initial topography plot."""
         self.ax.clear()
@@ -221,8 +318,14 @@ class TopographyWidget(QWidget):
                     ha='center', va='center', 
                     fontsize=12, color=self.theme_colors['fg_primary'])
         
+        # Clear colorbar
+        self.colorbar_ax.clear()
+        self.colorbar_ax.axis('off')
+        
         self.figure.tight_layout()
         self.canvas.draw()
+        self.colorbar_figure.tight_layout()
+        self.colorbar_canvas.draw()
     
     def set_data(self, epoch_data, sampling_rate, epoch_length):
         """
@@ -449,12 +552,14 @@ class TopographyWidget(QWidget):
         power_values : dict
             Dictionary with channel names and power values
         """
-        # Clear the entire figure to remove old colorbar
-        self.figure.clear()
-        self.ax = self.figure.add_subplot(111)
+        # Clear the figures
+        self.ax.clear()
         self.ax.set_facecolor(self.theme_colors['bg_primary'])
         self.ax.set_aspect('equal')
         self.ax.axis('off')
+        
+        self.colorbar_ax.clear()
+        self.colorbar_ax.set_facecolor(self.theme_colors['bg_primary'])
         
         # Get electrode coordinates and powers
         electrode_positions = []
@@ -480,11 +585,17 @@ class TopographyWidget(QWidget):
         electrode_powers = np.array(electrode_powers)
         
         # Normalize power for color mapping
-        power_min, power_max = electrode_powers.min(), electrode_powers.max()
-        if power_max > power_min:
+        if self.fixed_scale_enabled and self.fixed_scale_min is not None and self.fixed_scale_max is not None:
+            # Use fixed scale
+            power_min, power_max = self.fixed_scale_min, self.fixed_scale_max
             norm = Normalize(vmin=power_min, vmax=power_max)
         else:
-            norm = Normalize(vmin=0, vmax=1)
+            # Auto scale based on data
+            power_min, power_max = electrode_powers.min(), electrode_powers.max()
+            if power_max > power_min:
+                norm = Normalize(vmin=power_min, vmax=power_max)
+            else:
+                norm = Normalize(vmin=0, vmax=1)
         
         colormap = cm.get_cmap('RdYlBu_r')
         
@@ -601,16 +712,17 @@ class TopographyWidget(QWidget):
         self.ax.set_title(title, fontsize=10, fontweight='bold', 
                          color=self.theme_colors['fg_primary'], pad=5)
         
-        # Add colorbar
-        cbar = self.figure.colorbar(im, ax=self.ax, fraction=0.046, pad=0.04)
-        cbar.set_label('Power (μV²/Hz)', color=self.theme_colors['fg_primary'], fontsize=9)
-        cbar.ax.tick_params(colors=self.theme_colors['fg_primary'], labelsize=8)
-        # Set colorbar background
-        cbar.ax.set_facecolor(self.theme_colors['bg_primary'])
-        cbar.outline.set_edgecolor(self.theme_colors['fg_primary'])
-        
         self.figure.tight_layout()
         self.canvas.draw()
+        
+        # Create separate colorbar in colorbar figure
+        cbar = self.colorbar_figure.colorbar(im, cax=self.colorbar_ax)
+        cbar.set_label('Power (μV²/Hz)', color=self.theme_colors['fg_primary'], fontsize=9)
+        cbar.ax.tick_params(colors=self.theme_colors['fg_primary'], labelsize=8)
+        cbar.outline.set_edgecolor(self.theme_colors['fg_primary'])
+        
+        self.colorbar_figure.tight_layout()
+        self.colorbar_canvas.draw()
     
     def clear_display(self):
         """Clear the topography display (used when disabled for performance)."""
@@ -626,8 +738,14 @@ class TopographyWidget(QWidget):
                     fontsize=12, color=self.theme_colors['fg_primary'],
                     style='italic')
         
+        # Clear colorbar
+        self.colorbar_ax.clear()
+        self.colorbar_ax.axis('off')
+        
         self.figure.tight_layout()
         self.canvas.draw()
+        self.colorbar_figure.tight_layout()
+        self.colorbar_canvas.draw()
     
     def set_epoch(self, epoch_idx):
         """Set the current epoch to display."""

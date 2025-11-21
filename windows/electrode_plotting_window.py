@@ -385,6 +385,48 @@ class ElectrodePlottingWindow(QWidget):
         if hasattr(self, 'electrodes_table'):
             self.electrodes_table.setStyleSheet(THEME_STYLES.get('table', ''))
     
+    def show_message_box(self, icon, title, text):
+        """Show a styled message box with visible buttons.
+        
+        Args:
+            icon: QMessageBox.Icon (Information, Warning, Critical)
+            title: Dialog title
+            text: Message text
+        """
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(icon)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(text)
+        
+        # Get theme colors for button styling - match secondary button style
+        bg_color = self.theme_colors.get('bg_tertiary', '#414868')
+        fg_color = self.theme_colors.get('fg_primary', '#c0caf5')
+        border_color = self.theme_colors.get('border', '#414868')
+        hover_bg = self.theme_colors.get('hover', '#565f89')
+        hover_border = self.theme_colors.get('accent_blue', '#7aa2f7')  # Accent on hover only
+        
+        # Style the message box buttons to match theme secondary button style
+        msg_box.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {bg_color};
+                color: {fg_color};
+                border: 1px solid {border_color};
+                padding: 8px 16px;
+                border-radius: 6px;
+                min-width: 80px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+                border-color: {hover_border};
+            }}
+            QPushButton:pressed {{
+                background-color: {self.theme_colors.get('active', '#565f89')};
+            }}
+        """)
+        
+        msg_box.exec()
+    
     def on_display_option_changed(self):
         """Handle changes to display options (number/name checkboxes)."""
         self.show_number = self.show_number_checkbox.isChecked()
@@ -405,10 +447,10 @@ class ElectrodePlottingWindow(QWidget):
             
             # Validate coordinates
             if not (-5 <= x <= 5):
-                QMessageBox.warning(self, "Invalid Coordinate", "X coordinate must be between -5 and 5")
+                self.show_message_box(QMessageBox.Icon.Warning, "Invalid Coordinate", "X coordinate must be between -5 and 5")
                 return
             if not (-8 <= y <= 5):
-                QMessageBox.warning(self, "Invalid Coordinate", "Y coordinate must be between -8 and 5")
+                self.show_message_box(QMessageBox.Icon.Warning, "Invalid Coordinate", "Y coordinate must be between -8 and 5")
                 return
             
             # Add to image and data
@@ -420,7 +462,7 @@ class ElectrodePlottingWindow(QWidget):
             self.y_coord_input.clear()
             
         except ValueError:
-            QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric coordinates")
+            self.show_message_box(QMessageBox.Icon.Warning, "Invalid Input", "Please enter valid numeric coordinates")
     
     def add_electrode_to_data(self, x, y, name=None):
         """Add electrode to the data list and update table."""
@@ -556,14 +598,14 @@ class ElectrodePlottingWindow(QWidget):
                 # Validate coordinate ranges
                 if column == 2:  # X coordinate (ML)
                     if not (-5 <= new_value <= 5):
-                        QMessageBox.warning(self, "Invalid Coordinate", "ML coordinate must be between -5 and 5")
+                        self.show_message_box(QMessageBox.Icon.Warning, "Invalid Coordinate", "ML coordinate must be between -5 and 5")
                         # Restore old value
                         item.setText(str(self.electrodes_data[row]['x']))
                         return
                     self.electrodes_data[row]['x'] = round(new_value, 3)
                 else:  # column == 3, Y coordinate (AP)
                     if not (-8 <= new_value <= 5):
-                        QMessageBox.warning(self, "Invalid Coordinate", "AP coordinate must be between -8 and 5")
+                        self.show_message_box(QMessageBox.Icon.Warning, "Invalid Coordinate", "AP coordinate must be between -8 and 5")
                         # Restore old value
                         item.setText(str(self.electrodes_data[row]['y']))
                         return
@@ -582,7 +624,7 @@ class ElectrodePlottingWindow(QWidget):
             self.positions_updated.emit(self.electrodes_data.copy())
             
         except ValueError:
-            QMessageBox.warning(self, "Invalid Input", "Please enter a valid numeric value")
+            self.show_message_box(QMessageBox.Icon.Warning, "Invalid Input", "Please enter a valid numeric value")
             # Restore old value
             if column == 2:
                 item.setText(str(self.electrodes_data[row]['x']))
@@ -596,7 +638,7 @@ class ElectrodePlottingWindow(QWidget):
     def save_electrodes(self):
         """Save electrode positions to a JSON file."""
         if not self.electrodes_data:
-            QMessageBox.warning(self, "No Data", "No electrodes to save")
+            self.show_message_box(QMessageBox.Icon.Warning, "No Data", "No electrodes to save")
             return
         
         # Rebuild image to reflect any name changes before saving
@@ -619,9 +661,9 @@ class ElectrodePlottingWindow(QWidget):
                 )
                 self.save_button.setText("✅ Saved")
                 
-                QMessageBox.information(self, "Success", f"Electrodes saved to {file_path}")
+                self.show_message_box(QMessageBox.Icon.Information, "Success", f"Electrodes saved to {file_path}")
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Error saving file: {str(e)}")
+                self.show_message_box(QMessageBox.Icon.Critical, "Error", f"Error saving file: {str(e)}")
     
     def load_electrodes(self):
         """Load electrode positions from a JSON file."""
@@ -656,7 +698,7 @@ class ElectrodePlottingWindow(QWidget):
                 )
                 self.load_button.setText("✅ Electrodes Loaded")
                 
-                QMessageBox.information(self, "Success", f"Loaded {len(loaded_data)} electrodes")
+                self.show_message_box(QMessageBox.Icon.Information, "Success", f"Loaded {len(loaded_data)} electrodes")
                 
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Error loading file: {str(e)}")
+                self.show_message_box(QMessageBox.Icon.Critical, "Error", f"Error loading file: {str(e)}")
