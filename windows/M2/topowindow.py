@@ -20,17 +20,25 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QDoubleSpinBox, QDialogButtonBox, QButtonGroup,
                              QRadioButton)
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 
 
 class FixedScaleDialog(QDialog):
     """Dialog for setting fixed power scale."""
     
-    def __init__(self, current_min=None, current_max=None, parent=None):
+    def __init__(self, current_min=None, current_max=None, theme_colors=None, parent=None):
         super().__init__(parent)
+        self.theme_colors = theme_colors or {'bg_primary': '#1a1a1a', 'fg_primary': '#ffffff'}
         self.setWindowTitle("Fixed Power Scale")
         self.current_min = current_min
         self.current_max = current_max
+        
+        # Set background color to match theme
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QColor(self.theme_colors['bg_primary']))
+        self.setPalette(palette)
+        
         self.init_ui()
         
     def init_ui(self):
@@ -70,9 +78,17 @@ class FixedScaleDialog(QDialog):
 class CustomFrequencyDialog(QDialog):
     """Dialog for entering custom frequency range."""
     
-    def __init__(self, parent=None):
+    def __init__(self, theme_colors=None, parent=None):
         super().__init__(parent)
+        self.theme_colors = theme_colors or {'bg_primary': '#1a1a1a', 'fg_primary': '#ffffff'}
         self.setWindowTitle("Custom Frequency Range")
+        
+        # Set background color to match theme
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QColor(self.theme_colors['bg_primary']))
+        self.setPalette(palette)
+        
         self.init_ui()
         
     def init_ui(self):
@@ -268,7 +284,7 @@ class TopographyWidget(QWidget):
     
     def on_custom_clicked(self):
         """Handle custom frequency band selection."""
-        dialog = CustomFrequencyDialog(self)
+        dialog = CustomFrequencyDialog(self.theme_colors, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.current_freq_band = dialog.get_frequency_range()
             print(f"Custom frequency band: {self.current_freq_band[0]}-{self.current_freq_band[1]} Hz")
@@ -280,7 +296,7 @@ class TopographyWidget(QWidget):
         """Handle fixed scale button toggle."""
         if checked:
             # Show dialog to set scale range
-            dialog = FixedScaleDialog(self.fixed_scale_min, self.fixed_scale_max, self)
+            dialog = FixedScaleDialog(self.fixed_scale_min, self.fixed_scale_max, self.theme_colors, self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 self.fixed_scale_min, self.fixed_scale_max = dialog.get_scale_range()
                 self.fixed_scale_enabled = True

@@ -11,11 +11,14 @@ from matplotlib.figure import Figure
 from scipy import signal
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QCursor
 
 
 class SpectrogramWidget(QWidget):
     """Widget for displaying EEG power spectrogram."""
+    
+    # Signal emitted when user selects an epoch by clicking
+    epoch_selected = pyqtSignal(int)  # epoch_idx
     
     def __init__(self, theme_colors=None, parent=None):
         super().__init__(parent)
@@ -36,6 +39,9 @@ class SpectrogramWidget(QWidget):
         self.precomputed_spectrogram = None  # Shape: (n_freq_bins, n_epochs)
         self.freq_bins = None  # Frequency bin edges
         
+        # Selection mode for clicking to select epoch
+        self.selection_mode = False
+        
         self.init_ui()
         
     def init_ui(self):
@@ -49,7 +55,13 @@ class SpectrogramWidget(QWidget):
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111)
         
+        # Connect click event
+        self.canvas.mpl_connect('button_press_event', self.on_click)
+        
         layout.addWidget(self.canvas)
+        
+        # Set focus policy to receive keyboard events
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         # Initialize the plot
         self.update_plot()
@@ -170,8 +182,8 @@ class SpectrogramWidget(QWidget):
         # Add diamond marker above the plot after tight_layout
         # This ensures it's positioned correctly relative to the axis
         epoch_center = self.current_epoch + 0.5
-        self.ax.plot(epoch_center, 31.5, marker='D', markersize=10, 
-                    color='yellow', markeredgecolor='white', markeredgewidth=2,
+        self.ax.plot(epoch_center, 32, marker='D', markersize=6, 
+                    color='yellow', markeredgecolor='white', markeredgewidth=1,
                     clip_on=False, zorder=10)
         
         self.canvas.draw()
@@ -230,6 +242,52 @@ class SpectrogramWidget(QWidget):
         self.vmin = vmin
         self.vmax = vmax
         self.update_plot()
+    
+    def on_click(self, event):
+        """Handle mouse click on spectrogram."""
+        if not self.selection_mode or event.xdata is None:
+            return
+        
+        # Calculate which epoch was clicked
+        if self.data is None or self.sampling_rate is None:
+            return
+        
+        clicked_time = event.xdata
+        clicked_epoch = int(clicked_time / self.epoch_length)
+        
+        # Calculate total number of epochs
+        total_samples = len(self.data)
+        samples_per_epoch = int(self.sampling_rate * self.epoch_length)
+        n_epochs = max(1, total_samples // samples_per_epoch)
+        
+        # Validate epoch range
+        if 0 <= clicked_epoch < n_epochs:
+            # Emit signal to change current epoch
+            self.epoch_selected.emit(clicked_epoch)
+            # Disable selection mode after selection
+            self.selection_mode = False
+            # Restore cursor to arrow
+            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            print(f"Selected epoch {clicked_epoch} at time {clicked_time:.2f}s")
+    
+    def keyPressEvent(self, event):
+        """Handle keyboard events."""
+        key = event.key()
+        
+        if key == Qt.Key.Key_A:
+            # Toggle selection mode
+            self.selection_mode = not self.selection_mode
+            if self.selection_mode:
+                # Change cursor to crosshair
+                self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+                print("Selection mode enabled. Click on spectrogram to select epoch.")
+            else:
+                # Restore default cursor
+                self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+                print("Selection mode disabled.")
+        else:
+            # Let parent handle other keys
+            super().keyPressEvent(event)
 
 
 class LabelWidget(QWidget):
@@ -317,9 +375,7 @@ class LabelWidget(QWidget):
             if score <= 8 and 0 <= self.current_epoch < self.n_epochs:
                 self.labels[self.current_epoch] = score
                 self.label_changed.emit(self.current_epoch, score)
-                # Move to next epoch without shifting view
-                if self.current_epoch < self.n_epochs - 1:
-                    self.current_epoch += 1
+                # Stay on current epoch - only update color
                 self.update_plot()
         # Handle arrow keys for navigation
         elif key == Qt.Key.Key_Left and self.current_epoch > 0:

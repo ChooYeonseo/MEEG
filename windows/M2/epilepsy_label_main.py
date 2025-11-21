@@ -184,7 +184,7 @@ class EpilepsyLabelWindow(QWidget):
         self.spectrogram_vmax = None  # Auto
         self.zoom_acceleration = 1  # Tracks consecutive zoom operations
         self.last_zoom_time = 0  # Track last zoom button click time
-        self.zoom_threshold = 0.7  # Time threshold for continuous clicks (seconds)
+        self.zoom_threshold = 0.3  # Time threshold for continuous clicks (seconds)
         
         # Topography toggle state
         self.topo_enabled = True  # Topography updates enabled by default
@@ -530,6 +530,7 @@ class EpilepsyLabelWindow(QWidget):
         
         # Right Middle: Spectrogram (0.2 height)
         self.spectrogram_widget = SpectrogramWidget(self.theme_colors)
+        self.spectrogram_widget.epoch_selected.connect(self.on_epoch_selected)
         # Get first channel for spectrogram if available
         if not self.df.empty:
             first_channel_data = self.df.iloc[:, 0].values
