@@ -173,6 +173,98 @@ def resample_dataframe(data, target_rate, original_rate=None):
     return pd.DataFrame(resampled_data)
 
 @preprocessing_method(
+    name="Robust Resample",
+    description="Resamples by selecting indices from a reference channel and applying to all channels. This ensures temporal synchronization across all channels.",
+    category="General",
+    parameters={
+        'target_rate': {
+            'type': 'float',
+            'default': 256,
+            'min': 1,
+            'max': 2000,
+            'label': 'Target Sampling Rate (Hz)',
+            'description': 'The desired sampling rate after resampling'
+        },
+        'reference_channel': {
+            'type': 'dropdown',
+            'default': 'auto',
+            'label': 'Reference Channel',
+            'description': 'Channel to use for determining resample indices',
+            'get_options': lambda data: ['auto'] + [col for col in data.columns if col != 'time']
+        }
+    }
+)
+def robust_resample_dataframe(data, target_rate, reference_channel='auto', original_rate=None):
+    """
+    Resample DataFrame by selecting indices from a reference channel and applying to all channels.
+    This ensures all channels are sampled at the exact same time points.
+    
+    Parameters:
+    -----------
+    data : pandas.DataFrame
+        DataFrame with time and channel data
+    target_rate : float
+        Target sampling rate in Hz
+    reference_channel : str, optional
+        Column name to use as reference for resampling (default: 'auto' uses first non-time column)
+    original_rate : float, optional
+        Original sampling rate in Hz (if None, estimated from data)
+        
+    Returns:
+    --------
+    resampled_df : pandas.DataFrame
+        Resampled DataFrame with synchronized time points across all channels
+    """
+    
+    # Get available channels (excluding 'time')
+    available_channels = [col for col in data.columns if col != 'time']
+    
+    # Calculate resampling factor
+    if original_rate is None:
+        original_rate = get_sampling_rate(data)
+        
+    print(f"Robust resampling from {original_rate:.1f} Hz to {target_rate:.1f} Hz")
+    print(f"Available channels: {', '.join(available_channels)}")
+        
+    resample_factor = target_rate / original_rate
+    new_length = int(len(data) * resample_factor)
+    
+    # Select reference channel
+    if reference_channel == 'auto':
+        reference_channel = available_channels[0]
+        print(f"Auto-selected reference channel: {reference_channel}")
+    else:
+        if reference_channel not in data.columns:
+            raise ValueError(f"Reference channel '{reference_channel}' not found in data. Available: {available_channels}")
+        print(f"Using user-selected reference channel: {reference_channel}")
+    
+    # Resample the reference channel to get the target indices
+    resampled_reference = signal.resample(data[reference_channel].values, new_length)
+    
+    # Find the closest original indices for each resampled point
+    # This is done by finding where the resampled values would fall in the original signal
+    original_indices = np.linspace(0, len(data) - 1, new_length).astype(int)
+    
+    # Create new time vector using the selected indices
+    new_time = data['time'].iloc[original_indices].values
+    
+    # Apply the same indices to all channels
+    resampled_data = {'time': new_time}
+    
+    for column in tqdm(data.columns, desc="Applying resample indices to channels"):
+        if column != 'time':
+            resampled_data[column] = data[column].iloc[original_indices].values
+    
+    # Verify the new sampling rate
+    if new_length > 1:
+        actual_new_rate = 1.0 / np.median(np.diff(new_time))
+        print(f"Actual new sampling rate: {actual_new_rate:.1f} Hz (target: {target_rate:.1f} Hz)")
+    
+    print(f"Robust resampling completed: {len(data)} → {new_length} samples")
+    print(f"All channels synchronized to same time points")
+    return pd.DataFrame(resampled_data)
+
+@preprocessing_method(
     name="Bandpass Filter",
     description="Applies a zero-phase bandpass filter to retain frequencies within a specified range. Uses Butterworth filter design.",
     category="Filtering",
