@@ -2,7 +2,9 @@
 data/*
 cache/*
 dist/*
-
+MEEG.dmg
+MEEG.spec
+build/* 
 # But, do not ignore the 'compressed' subdirectory itself
 !data/compressed/
 
