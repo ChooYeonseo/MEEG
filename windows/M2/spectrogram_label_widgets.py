@@ -295,6 +295,8 @@ class LabelWidget(QWidget):
     
     # Signal emitted when a label is changed
     label_changed = pyqtSignal(int, int)  # epoch, score
+    # Signal emitted when spacebar is pressed (for video tab switch)
+    spacebar_pressed = pyqtSignal(int)  # current epoch
     
     def __init__(self, theme_colors=None, parent=None):
         super().__init__(parent)
@@ -405,6 +407,9 @@ class LabelWidget(QWidget):
                 # Emit signal to sync all plots
                 self.label_changed.emit(self.current_epoch, int(self.labels[self.current_epoch]))
                 self.update_plot()
+        # Handle spacebar for video tab switch
+        elif key == Qt.Key.Key_Space:
+            self.spacebar_pressed.emit(self.current_epoch)
         else:
             # Let parent handle other keys
             super().keyPressEvent(event)

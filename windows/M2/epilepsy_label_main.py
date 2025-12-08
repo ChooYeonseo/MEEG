@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QMessageBox, QTextEdit, QSpinBox, QPushButton,
                              QGroupBox, QFormLayout, QSplitter, QFileDialog,
                              QDialog, QDoubleSpinBox, QCheckBox, QComboBox,
-                             QDialogButtonBox, QMenuBar)
+                             QDialogButtonBox, QMenuBar, QTabWidget)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor, QAction
 
@@ -23,6 +23,7 @@ from theme import preferences_manager
 from .topowindow import TopographyWidget
 from .mosaicwindow import MosaicPlotterWidget
 from .spectrogram_label_widgets import SpectrogramWidget, LabelWidget
+from .video_sync_widget import VideoSyncWidget
 
 
 class InitialConfigDialog(QDialog):
@@ -489,6 +490,16 @@ class EpilepsyLabelWindow(QWidget):
         
         main_layout.setMenuBar(menu_bar)
         
+        # === CREATE TAB WIDGET ===
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabPosition(QTabWidget.TabPosition.North)
+        
+        # === LABEL TAB (original content) ===
+        label_tab = QWidget()
+        label_tab_layout = QVBoxLayout(label_tab)
+        label_tab_layout.setContentsMargins(0, 0, 0, 0)
+        label_tab_layout.setSpacing(5)
+        
         # Create main splitter (left 0.3 | right 0.7)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         
@@ -524,6 +535,7 @@ class EpilepsyLabelWindow(QWidget):
         # Right Upper: Mosaic Plotter (0.6 height)
         self.mosaic_plotter = MosaicPlotterWidget(self.df, self.mosaic, self.sampling_rate, self.theme_colors)
         self.mosaic_plotter.epoch_clicked.connect(self.on_epoch_selected)
+        self.mosaic_plotter.epoch_double_clicked.connect(self.on_epoch_double_clicked)
         self.mosaic_plotter.set_epochs_to_show(self.mosaic_epochs_to_show)
         self.mosaic_plotter.set_epoch_length(self.epoch_length)
         right_layout.addWidget(self.mosaic_plotter, 60)  # 60% stretch
@@ -550,6 +562,7 @@ class EpilepsyLabelWindow(QWidget):
         # Right Lower: Label Window (0.2 height)
         self.label_widget = LabelWidget(self.theme_colors)
         self.label_widget.label_changed.connect(self.on_label_changed)
+        self.label_widget.spacebar_pressed.connect(self.on_spacebar_pressed)
         # Initialize labels based on number of epochs
         n_epochs = self.get_n_epochs()
         self.label_widget.initialize_labels(n_epochs)
@@ -562,10 +575,23 @@ class EpilepsyLabelWindow(QWidget):
         # Set main splitter sizes (33-67, i.e., 1/3 - 2/3)
         main_splitter.setSizes([333, 667])
         
-        main_layout.addWidget(main_splitter)
+        label_tab_layout.addWidget(main_splitter)
+        self.tab_widget.addTab(label_tab, "📊 Label")
+        
+        # === VIDEO TAB ===
+        self.video_widget = VideoSyncWidget(self.theme_colors)
+        self.video_widget.set_epoch_length(self.epoch_length)
+        self.video_widget.set_sampling_rate(self.sampling_rate)
+        self.video_widget.set_eeg_data(self.df, self.mosaic)
+        self.video_widget.set_electrode_positions(self.electrode_positions)
+        self.video_widget.return_to_label.connect(self.on_return_to_label)
+        self.tab_widget.addTab(self.video_widget, "🎬 Video")
+        
+        main_layout.addWidget(self.tab_widget)
         
         # Initialize epoch display
         self.update_epoch_displays()
+
         
     def create_control_panel(self):
         """Create the control panel widget with 3 sub-panels."""
@@ -811,6 +837,32 @@ class EpilepsyLabelWindow(QWidget):
         # Sync current epoch and update displays (but skip label view update to prevent auto-shift)
         self.current_epoch = epoch_idx
         self.update_epoch_displays(update_label_view=False)
+    
+    def on_epoch_double_clicked(self, epoch_idx):
+        """Handle double-click on epoch in mosaic plotter - switch to video tab."""
+        self.current_epoch = epoch_idx
+        self.update_epoch_displays()
+        # Switch to video tab and seek to epoch
+        self.switch_to_video_tab(epoch_idx)
+        
+    def on_spacebar_pressed(self, epoch_idx):
+        """Handle spacebar press in label widget - switch to video tab."""
+        # Switch to video tab and seek to current epoch
+        self.switch_to_video_tab(epoch_idx)
+        
+    def on_return_to_label(self):
+        """Handle return to label button in video widget."""
+        self.tab_widget.setCurrentIndex(0)  # Switch to Label tab
+        # Set focus back to label widget for keyboard navigation
+        self.label_widget.setFocus()
+        
+    def switch_to_video_tab(self, epoch_idx):
+        """Switch to video tab and seek to the given epoch."""
+        # Update video widget with current epoch
+        self.video_widget.seek_to_epoch(epoch_idx)
+        # Switch to Video tab (index 1)
+        self.tab_widget.setCurrentIndex(1)
+        print(f"Switched to Video tab at epoch {epoch_idx}")
     
     def on_mosaic_epochs_changed(self, value):
         """Handle mosaic epochs to show change."""

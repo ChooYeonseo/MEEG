@@ -1,6 +1,7 @@
 # Ignore all contents inside the 'data' directory
 data/*
 cache/*
+dist/*
 
 # But, do not ignore the 'compressed' subdirectory itself
 !data/compressed/

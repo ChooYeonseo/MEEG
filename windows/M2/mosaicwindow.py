@@ -19,6 +19,8 @@ class MosaicPlotterWidget(QWidget):
     
     # Signal emitted when epoch is clicked
     epoch_clicked = pyqtSignal(int)  # epoch index
+    # Signal emitted when epoch is double-clicked (for video tab switch)
+    epoch_double_clicked = pyqtSignal(int)  # epoch index
     
     def __init__(self, df=None, mosaic_relationships=None, sampling_rate=None, theme_colors=None, parent=None):
         super().__init__(parent)
@@ -70,6 +72,10 @@ class MosaicPlotterWidget(QWidget):
             # Calculate which epoch was clicked
             clicked_epoch = int(np.clip(event.xdata / self.epoch_length, 0, self.get_n_epochs() - 1))
             self.epoch_clicked.emit(clicked_epoch)
+            
+            # Check for double-click
+            if event.dblclick:
+                self.epoch_double_clicked.emit(clicked_epoch)
             
     def get_n_epochs(self):
         """Get total number of epochs in the data."""
