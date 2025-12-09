@@ -33,10 +33,18 @@ echo "The application bundle is located at:"
 echo "  dist/MEEG.app (macOS application)"
 echo "  dist/MEEG/ (folder with executable)"
 echo ""
-echo "To run the app:"
-echo "  open dist/MEEG.app"
+# Create DMG
+echo "Creating DMG installer..."
+rm -f MEEG.dmg
+hdiutil create -volname "MEEG Installer" -srcfolder dist/MEEG.app -ov -format UDZO MEEG.dmg
+
 echo ""
-echo "To distribute, you can:"
-echo "  1. Zip the .app bundle: zip -r MEEG.zip dist/MEEG.app"
-echo "  2. Create a DMG (optional): hdiutil create -srcfolder dist/MEEG.app MEEG.dmg"
+echo "==================================="
+echo "Build complete!"
+echo "==================================="
 echo ""
+echo "Output files:"
+echo "  - Application: dist/MEEG.app"
+echo "  - Installer:   MEEG.dmg"
+echo ""
+
