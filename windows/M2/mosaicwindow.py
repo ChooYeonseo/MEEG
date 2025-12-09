@@ -87,34 +87,64 @@ class MosaicPlotterWidget(QWidget):
         
     def update_plot(self):
         """Update the montage plot display."""
-        self.ax.clear()
-        self.ax.set_facecolor('white')
-        
         if self.df.empty or not self.mosaic_relationships:
+            self.ax.clear()
+            self.ax.set_facecolor('white')
             self.ax.text(0.5, 0.5, 'No data to display', 
                         transform=self.ax.transAxes,
                         ha='center', va='center', color='black', fontsize=12)
             self.canvas.draw()
             return
-            
-        # Calculate time range to display
-        start_epoch = max(0, self.current_epoch - self.epochs_to_show // 2)
-        end_epoch = min(self.get_n_epochs(), start_epoch + self.epochs_to_show)
-        start_epoch = max(0, end_epoch - self.epochs_to_show)
+
+        self.plot_data(self.ax)
+        self.canvas.draw()
+
+    def plot_data(self, ax, start_epoch=None, n_epochs_to_show=None, theme_colors=None):
+        """
+        Plot the mosaic data onto the provided axes.
         
-        start_sample = int(start_epoch * self.epoch_length * self.sampling_rate)
-        end_sample = int(end_epoch * self.epoch_length * self.sampling_rate)
+        Parameters:
+        -----------
+        ax : matplotlib.axes.Axes
+            Axes to plot on
+        start_epoch : int, optional
+            Starting epoch index. If None, uses self.current_epoch centered view
+        n_epochs_to_show : int, optional
+            Number of epochs to show. If None, uses self.epochs_to_show
+        theme_colors : dict, optional
+            Theme colors for styling.
+        """
+        ax.clear()
+        ax.set_facecolor('white')
+        
+        if self.df.empty or not self.mosaic_relationships:
+            return
+
+        epochs_show = n_epochs_to_show if n_epochs_to_show is not None else self.epochs_to_show
+        
+        # Calculate time range to display
+        if start_epoch is None:
+            # Centered view based on current epoch
+            s_epoch = max(0, self.current_epoch - epochs_show // 2)
+            e_epoch = min(self.get_n_epochs(), s_epoch + epochs_show)
+            s_epoch = max(0, e_epoch - epochs_show)
+        else:
+            # Explicit range
+            s_epoch = start_epoch
+            e_epoch = min(self.get_n_epochs(), s_epoch + epochs_show)
+        
+        start_sample = int(s_epoch * self.epoch_length * self.sampling_rate)
+        end_sample = int(e_epoch * self.epoch_length * self.sampling_rate)
         end_sample = min(end_sample, len(self.df))
         
         if start_sample >= end_sample:
-            self.canvas.draw()
             return
             
         # Get data slice
         df_slice = self.df.iloc[start_sample:end_sample]
-        time_array = np.arange(len(df_slice)) / self.sampling_rate + start_epoch * self.epoch_length
+        time_array = np.arange(len(df_slice)) / self.sampling_rate + s_epoch * self.epoch_length
         
-        # Group mosaic relationships (similar to Figure1D.py)
+        # Group mosaic relationships
         montage_groups = self.group_mosaic_relationships()
         
         # Plot each montage group
@@ -143,7 +173,7 @@ class MosaicPlotterWidget(QWidget):
                 montage_data = data_ch1 - data_ch2
                 
                 # Plot the montage data
-                self.ax.plot(time_array, montage_data + current_y_offset, 
+                ax.plot(time_array, -montage_data + current_y_offset, 
                            color='black', linewidth=0.8)
                 
                 # Save y-axis tick and label
@@ -158,62 +188,61 @@ class MosaicPlotterWidget(QWidget):
                 current_y_offset -= (self.spacing_cluster - self.spacing)
         
         # Draw vertical grid lines every 1 second
-        duration = (end_epoch - start_epoch) * self.epoch_length
-        for t in np.arange(start_epoch * self.epoch_length, 
-                          (end_epoch * self.epoch_length) + 1, 1):
+        for t in np.arange(s_epoch * self.epoch_length, 
+                          (e_epoch * self.epoch_length) + 1, 1):
             if t % 5 == 0:
                 # Every 5 seconds: darker and thicker
-                self.ax.axvline(x=t, color='#1a1a1a', alpha=0.8, linewidth=1.5, linestyle='-')
+                ax.axvline(x=t, color='#1a1a1a', alpha=0.8, linewidth=1.5, linestyle='-')
             else:
                 # Every 1 second: lighter
-                self.ax.axvline(x=t, color='#404040', alpha=0.4, linewidth=0.8, linestyle='-')
+                ax.axvline(x=t, color='#404040', alpha=0.4, linewidth=0.8, linestyle='-')
         
-        # Highlight current epoch
-        epoch_start_time = self.current_epoch * self.epoch_length
-        epoch_end_time = (self.current_epoch + 1) * self.epoch_length
-        self.ax.axvspan(epoch_start_time, epoch_end_time, 
-                       alpha=0.2, color='yellow', zorder=0)
+        # Highlight current epoch only if we are in normal view mode (not saving custom range)
+        if start_epoch is None:
+            epoch_start_time = self.current_epoch * self.epoch_length
+            epoch_end_time = (self.current_epoch + 1) * self.epoch_length
+            ax.axvspan(epoch_start_time, epoch_end_time, 
+                        alpha=0.2, color='yellow', zorder=0)
         
         # Add scale bar (200 µV)
         if y_ticks:
             scale_bar_height = 200  # µV
-            scale_bar_x = start_epoch * self.epoch_length + 0.5
+            scale_bar_x = s_epoch * self.epoch_length + 0.5
             scale_bar_y_start = y_ticks[0] + self.limit * 0.5
             scale_bar_y_end = scale_bar_y_start - scale_bar_height
             
-            self.ax.plot([scale_bar_x, scale_bar_x], 
+            ax.plot([scale_bar_x, scale_bar_x], 
                        [scale_bar_y_start, scale_bar_y_end], 
                        'r-', linewidth=2)
-            self.ax.text(scale_bar_x + 0.3, (scale_bar_y_start + scale_bar_y_end) / 2,
+            ax.text(scale_bar_x + 0.3, (scale_bar_y_start + scale_bar_y_end) / 2,
                        '200µV', color='red', fontsize=8, va='center')
         
         # Set axis properties
-        self.ax.set_yticks(y_ticks)
-        self.ax.set_yticklabels(y_labels, fontsize=9, color='black')
-        self.ax.set_xlabel('Time (s)', fontsize=10, color='black')
-        self.ax.set_ylabel('Montage', fontsize=10, color='black')
-        self.ax.set_xlim(start_epoch * self.epoch_length, end_epoch * self.epoch_length)
+        ax.set_yticks(y_ticks)
+        ax.set_yticklabels(y_labels, fontsize=9, color='black')
+        ax.set_xlabel('Time (s)', fontsize=10, color='black')
+        ax.set_ylabel('Montage', fontsize=10, color='black')
+        ax.set_xlim(s_epoch * self.epoch_length, e_epoch * self.epoch_length)
         
         # Set x-ticks at every 1 second
-        x_start = start_epoch * self.epoch_length
-        x_end = end_epoch * self.epoch_length
+        x_start = s_epoch * self.epoch_length
+        x_end = e_epoch * self.epoch_length
         x_ticks = np.arange(np.ceil(x_start), x_end + 1, 1)
-        self.ax.set_xticks(x_ticks)
+        ax.set_xticks(x_ticks)
         
         if y_ticks:
             y_min = min(y_ticks) - self.limit * 1.2
             y_max = max(y_ticks) + self.limit * 1.2
-            self.ax.set_ylim(y_min, y_max)
+            ax.set_ylim(y_min, y_max)
         
-        self.ax.grid(True, alpha=0.2, color='gray')
-        self.ax.tick_params(colors='black')
-        self.ax.spines['bottom'].set_color('black')
-        self.ax.spines['left'].set_color('black')
-        self.ax.spines['top'].set_color('black')
-        self.ax.spines['right'].set_color('black')
+        ax.grid(True, alpha=0.2, color='gray')
+        ax.tick_params(colors='black')
+        ax.spines['bottom'].set_color('black')
+        ax.spines['left'].set_color('black')
+        ax.spines['top'].set_color('black')
+        ax.spines['right'].set_color('black')
         
         self.figure.tight_layout()
-        self.canvas.draw()
         
     def group_mosaic_relationships(self):
         """Group mosaic relationships into clusters.

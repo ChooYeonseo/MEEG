@@ -15,8 +15,20 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QProgressDialog, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QTimer
 from PyQt6.QtGui import QFont, QKeyEvent
-from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PyQt6.QtMultimediaWidgets import QVideoWidget
+
+# Try to import multimedia - it may not be available on all systems
+MULTIMEDIA_AVAILABLE = False
+try:
+    from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+    from PyQt6.QtMultimediaWidgets import QVideoWidget
+    MULTIMEDIA_AVAILABLE = True
+except ImportError:
+    print("WARNING: PyQt6 Multimedia not available. Video playback will be disabled.")
+    print("To enable video playback, install multimedia support:")
+    print("  pip install PyQt6-Qt6")
+    QMediaPlayer = None
+    QAudioOutput = None
+    QVideoWidget = None
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -116,7 +128,7 @@ class MosaicTimelineWidget(QWidget):
             data_ch2 = df_slice[ch2].values
             montage_data = data_ch1 - data_ch2
             
-            self.ax.plot(time_array, montage_data + current_y_offset, 
+            self.ax.plot(time_array, -montage_data + current_y_offset, 
                         color='black', linewidth=0.6)
             
             y_ticks.append(current_y_offset)
@@ -198,22 +210,41 @@ class VideoSyncWidget(QWidget):
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         video_layout.addWidget(title_label)
         
-        # Video widget
-        self.video_widget = QVideoWidget()
-        self.video_widget.setMinimumHeight(300)
-        self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        video_layout.addWidget(self.video_widget)
-        
-        # Media player
-        self.media_player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
-        self.media_player.setAudioOutput(self.audio_output)
-        self.media_player.setVideoOutput(self.video_widget)
-        
-        # Connect signals
-        self.media_player.positionChanged.connect(self.on_position_changed)
-        self.media_player.durationChanged.connect(self.on_duration_changed)
-        self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)
+        # Video widget - only create if multimedia is available
+        if MULTIMEDIA_AVAILABLE:
+            self.video_widget = QVideoWidget()
+            self.video_widget.setMinimumHeight(300)
+            self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            video_layout.addWidget(self.video_widget)
+            
+            # Media player
+            self.media_player = QMediaPlayer()
+            self.audio_output = QAudioOutput()
+            self.media_player.setAudioOutput(self.audio_output)
+            self.media_player.setVideoOutput(self.video_widget)
+            
+            # Connect signals
+            self.media_player.positionChanged.connect(self.on_position_changed)
+            self.media_player.durationChanged.connect(self.on_duration_changed)
+            self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)
+        else:
+            # Fallback when multimedia is not available
+            self.video_widget = None
+            self.media_player = None
+            self.audio_output = None
+            
+            fallback_label = QLabel(
+                "⚠️ Video playback not available\n\n"
+                "PyQt6 Multimedia module is not installed.\n\n"
+                "To enable video playback, run:\n"
+                "pip install PyQt6-Qt6\n\n"
+                "The mosaic EEG display and topography\n"
+                "will still work without video."
+            )
+            fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            fallback_label.setStyleSheet("color: orange; font-size: 14px; padding: 20px;")
+            fallback_label.setMinimumHeight(300)
+            video_layout.addWidget(fallback_label)
         
         # Playback controls
         controls_layout = QHBoxLayout()
@@ -335,6 +366,11 @@ class VideoSyncWidget(QWidget):
             
     def load_video(self, path):
         """Load a video file."""
+        if not MULTIMEDIA_AVAILABLE or self.media_player is None:
+            QMessageBox.warning(self, "Not Available", 
+                "Video playback requires PyQt6 Multimedia.\n"
+                "Please install: pip install PyQt6-Qt6")
+            return
         self.video_path = path
         self.video_path_label.setText(Path(path).name)
         self.video_path_label.setStyleSheet("color: green;")
@@ -343,6 +379,8 @@ class VideoSyncWidget(QWidget):
         
     def toggle_playback(self):
         """Toggle play/pause."""
+        if self.media_player is None:
+            return
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
             self.play_btn.setText("▶ Play")
@@ -352,11 +390,15 @@ class VideoSyncWidget(QWidget):
             
     def stop_playback(self):
         """Stop playback."""
+        if self.media_player is None:
+            return
         self.media_player.stop()
         self.play_btn.setText("▶ Play")
         
     def seek_position(self, position):
         """Seek to a position in the video."""
+        if self.media_player is None:
+            return
         self.media_player.setPosition(position)
         
     def on_position_changed(self, position):
@@ -377,6 +419,8 @@ class VideoSyncWidget(QWidget):
             
     def sync_mosaic_with_video(self):
         """Sync mosaic time marker with current video position."""
+        if self.media_player is None:
+            return
         video_time_ms = self.media_player.position()
         video_time = video_time_ms / 1000.0
         
@@ -448,12 +492,13 @@ class VideoSyncWidget(QWidget):
         self.update_topography_for_epoch(epoch_idx, eeg_time)
         self.last_displayed_epoch = epoch_idx
         
-        # Seek video
-        if video_time >= 0:
-            video_time_ms = int(video_time * 1000)
-            self.media_player.setPosition(video_time_ms)
-        else:
-            self.media_player.setPosition(0)
+        # Seek video (only if multimedia is available)
+        if self.media_player is not None:
+            if video_time >= 0:
+                video_time_ms = int(video_time * 1000)
+                self.media_player.setPosition(video_time_ms)
+            else:
+                self.media_player.setPosition(0)
             
         print(f"Seeking to epoch {epoch_idx}: EEG={eeg_time:.2f}s, Video={video_time:.2f}s")
         

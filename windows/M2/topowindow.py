@@ -559,7 +559,7 @@ class TopographyWidget(QWidget):
         # Plot the power map
         self.plot_power_on_head(power_values)
     
-    def plot_power_on_head(self, power_values):
+    def plot_power_on_head(self, power_values, ax=None, colorbar_ax=None, theme_colors=None, show_labels=True):
         """
         Plot power values on electrode map with interpolation.
         
@@ -567,15 +567,28 @@ class TopographyWidget(QWidget):
         -----------
         power_values : dict
             Dictionary with channel names and power values
+        ax : matplotlib.axes.Axes, optional
+            Axes to plot on. If None, uses self.ax
+        colorbar_ax : matplotlib.axes.Axes, optional
+            Axes to plot colorbar on. If None, uses self.colorbar_ax
+        theme_colors : dict, optional
+            Theme colors to use. If None, uses self.theme_colors
+        show_labels : bool, optional
+            Whether to show electrode labels. Default is True.
         """
-        # Clear the figures
-        self.ax.clear()
-        self.ax.set_facecolor(self.theme_colors['bg_primary'])
-        self.ax.set_aspect('equal')
-        self.ax.axis('off')
+        # Use provided axes or default to widget axes
+        target_ax = ax if ax is not None else self.ax
+        target_cbar_ax = colorbar_ax if colorbar_ax is not None else self.colorbar_ax
+        colors = theme_colors if theme_colors is not None else self.theme_colors
         
-        self.colorbar_ax.clear()
-        self.colorbar_ax.set_facecolor(self.theme_colors['bg_primary'])
+        # Clear the figures
+        target_ax.clear()
+        target_ax.set_facecolor(colors['bg_primary'])
+        target_ax.set_aspect('equal')
+        target_ax.axis('off')
+        
+        target_cbar_ax.clear()
+        target_cbar_ax.set_facecolor(colors['bg_primary'])
         
         # Get electrode coordinates and powers
         electrode_positions = []
@@ -590,13 +603,14 @@ class TopographyWidget(QWidget):
                 electrode_channels.append(channel)
         
         if not electrode_positions:
-            self.ax.text(0.5, 0.5, 'No data available', 
-                        transform=self.ax.transAxes,
+            target_ax.text(0.5, 0.5, 'No data available', 
+                        transform=target_ax.transAxes,
                         ha='center', va='center', 
-                        fontsize=12, color=self.theme_colors['fg_primary'])
-            self.canvas.draw()
+                        fontsize=12, color=colors['fg_primary'])
+            if ax is None: # Only draw if using internal canvas
+                self.canvas.draw()
             return
-        
+
         electrode_positions = np.array(electrode_positions)
         electrode_powers = np.array(electrode_powers)
         
@@ -647,7 +661,7 @@ class TopographyWidget(QWidget):
         grid_power = np.where(boundary_mask, grid_power, np.nan)
         
         # Plot interpolated surface
-        im = self.ax.pcolormesh(
+        im = target_ax.pcolormesh(
             grid_x, grid_y, grid_power,
             cmap=colormap,
             norm=norm,
@@ -658,7 +672,7 @@ class TopographyWidget(QWidget):
         
         # Add contour fill
         levels = np.linspace(power_min, power_max, 25)
-        self.ax.contourf(
+        target_ax.contourf(
             grid_x, grid_y, grid_power, 
             levels=levels, 
             cmap=colormap, 
@@ -669,7 +683,7 @@ class TopographyWidget(QWidget):
         )
         
         # Add contour lines
-        self.ax.contour(
+        target_ax.contour(
             grid_x, grid_y, grid_power,
             levels=8,
             colors='gray',
@@ -692,7 +706,7 @@ class TopographyWidget(QWidget):
                 boundary_coords = np.array(boundary_coords)
                 # Close the boundary by adding first point at the end
                 boundary_coords_closed = np.vstack([boundary_coords, boundary_coords[0]])
-                self.ax.plot(
+                target_ax.plot(
                     boundary_coords_closed[:, 0],
                     boundary_coords_closed[:, 1],
                     'k-',
@@ -707,38 +721,41 @@ class TopographyWidget(QWidget):
             color = colormap(norm(power))
             
             # Plot electrode marker
-            self.ax.scatter(x, y, s=200, c=[color], 
+            target_ax.scatter(x, y, s=200, c=[color], 
                           edgecolors='black', linewidth=2, zorder=10, alpha=1.0)
             
             # Add label
-            self.ax.text(x, y, channel, 
-                       ha='center', va='center', fontsize=9, fontweight='bold', 
-                       color='white', zorder=11, 
-                       bbox=dict(boxstyle='round,pad=0.3', 
-                               facecolor=self.theme_colors['bg_primary'], alpha=0.7,
-                               edgecolor='white', linewidth=1))
+            if show_labels:
+                target_ax.text(x, y, channel, 
+                           ha='center', va='center', fontsize=9, fontweight='bold', 
+                           color='white', zorder=11, 
+                           bbox=dict(boxstyle='round,pad=0.3', 
+                                   facecolor=colors['bg_primary'], alpha=0.7,
+                                   edgecolor='white', linewidth=1))
         
         # Set limits and title
         margin = 1.0
-        self.ax.set_xlim(x_min - margin, x_max + margin)
-        self.ax.set_ylim(y_min - margin, y_max + margin)
+        target_ax.set_xlim(x_min - margin, x_max + margin)
+        target_ax.set_ylim(y_min - margin, y_max + margin)
         
         # Title
         title = f"{self.current_freq_band[0]}-{self.current_freq_band[1]} Hz Band Power"
-        self.ax.set_title(title, fontsize=10, fontweight='bold', 
-                         color=self.theme_colors['fg_primary'], pad=5)
+        target_ax.set_title(title, fontsize=10, fontweight='bold', 
+                         color=colors['fg_primary'], pad=5)
         
-        self.figure.tight_layout()
-        self.canvas.draw()
+        if ax is None:
+            self.figure.tight_layout()
+            self.canvas.draw()
         
         # Create separate colorbar in colorbar figure
-        cbar = self.colorbar_figure.colorbar(im, cax=self.colorbar_ax)
-        cbar.set_label('Power (μV²/Hz)', color=self.theme_colors['fg_primary'], fontsize=9)
-        cbar.ax.tick_params(colors=self.theme_colors['fg_primary'], labelsize=8)
-        cbar.outline.set_edgecolor(self.theme_colors['fg_primary'])
+        cbar = self.colorbar_figure.colorbar(im, cax=target_cbar_ax)
+        cbar.set_label('Power (muV^2/Hz)', color=colors['fg_primary'], fontsize=9)
+        cbar.ax.tick_params(colors=colors['fg_primary'], labelsize=8)
+        cbar.outline.set_edgecolor(colors['fg_primary'])
         
-        self.colorbar_figure.tight_layout()
-        self.colorbar_canvas.draw()
+        if ax is None:
+            self.colorbar_figure.tight_layout()
+            self.colorbar_canvas.draw()
     
     def clear_display(self):
         """Clear the topography display (used when disabled for performance)."""
