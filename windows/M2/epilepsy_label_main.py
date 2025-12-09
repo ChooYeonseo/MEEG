@@ -12,9 +12,12 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QMessageBox, QTextEdit, QSpinBox, QPushButton,
                              QGroupBox, QFormLayout, QSplitter, QFileDialog,
                              QDialog, QDoubleSpinBox, QCheckBox, QComboBox,
-                             QDialogButtonBox, QMenuBar, QTabWidget)
+                             QDialogButtonBox, QMenuBar, QTabWidget,
+                             QInputDialog)
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor, QAction
+from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 # Import theme system
 from theme import preferences_manager
@@ -487,6 +490,27 @@ class EpilepsyLabelWindow(QWidget):
         save_labels_action = QAction("Save Labels", self)
         save_labels_action.triggered.connect(self.save_labels)
         file_menu.addAction(save_labels_action)
+        
+        # Save menu
+        save_menu = menu_bar.addMenu("Save")
+        
+        # Save Topography Image (Ctrl+S)
+        save_topo_action = QAction("Save Topography Image", self)
+        save_topo_action.setShortcut(QKeySequence("Ctrl+S"))
+        save_topo_action.triggered.connect(self.save_topography_image)
+        save_menu.addAction(save_topo_action)
+        
+        # Save Mosaic Plot (Ctrl+Shift+S)
+        save_mosaic_action = QAction("Save Mosaic Plot", self)
+        save_mosaic_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        save_mosaic_action.triggered.connect(self.save_mosaic_plot)
+        save_menu.addAction(save_mosaic_action)
+        
+        # Save Power Analysis (Ctrl+E)
+        save_power_action = QAction("Save Power Analysis", self)
+        save_power_action.setShortcut(QKeySequence("Ctrl+E"))
+        save_power_action.triggered.connect(self.save_power_analysis)
+        save_menu.addAction(save_power_action)
         
         main_layout.setMenuBar(menu_bar)
         
@@ -1145,4 +1169,228 @@ class EpilepsyLabelWindow(QWidget):
                     font-size: 10px;
                 }
             """)
+
+    # ----------------------------------------------------------------------
+    # Save Functionality Handlers
+    # ----------------------------------------------------------------------
+    
+    def save_topography_image(self):
+        """Save the current topography as a white-background image."""
+        try:
+            # 1. Ask for file path
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Topography Image", "", 
+                "PNG Image (*.png);;JPEG Image (*.jpg);;PDF Document (*.pdf)"
+            )
+            
+            if not file_path:
+                return
+            
+            # Ask if user wants to include channel labels
+            reply = QMessageBox.question(
+                self, "Include Labels?", 
+                "Do you want to include channel name labels in the image?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                QMessageBox.StandardButton.No
+            )
+            show_labels = (reply == QMessageBox.StandardButton.Yes)
+            
+            # 2. Create temporary figure with white background
+            # 5x5 inches, decent resolution
+            fig = Figure(figsize=(6, 5), facecolor='white')
+            
+            # Create subplots grid: Main plot (left) and Colorbar (right)
+            # Adjust widths to look good
+            gs = fig.add_gridspec(1, 2, width_ratios=[15, 1], wspace=0.1, 
+                                left=0.05, right=0.9, top=0.9, bottom=0.1)
+            
+            ax = fig.add_subplot(gs[0])
+            cbar_ax = fig.add_subplot(gs[1])
+            
+            # 3. Plot data
+            # Use white/black theme for export
+            export_theme = {'bg_primary': '#ffffff', 'fg_primary': '#000000'}
+            
+            # Get current power values
+            self.topo_widget.plot_power_on_head(
+                self.topo_widget.compute_psd_power(self.topo_widget.epoch_data, self.topo_widget.current_freq_band),
+                ax=ax,
+                colorbar_ax=cbar_ax,
+                theme_colors=export_theme,
+                show_labels=show_labels
+            )
+            
+            # 4. Save
+            canvas = FigureCanvas(fig)
+            fig.savefig(file_path, dpi=300, bbox_inches='tight')
+            
+            self.show_message_box(QMessageBox.Icon.Information, 
+                                "Success", f"Topography saved to:\n{file_path}")
+            
+        except Exception as e:
+            self.show_message_box(QMessageBox.Icon.Critical, 
+                                "Error", f"Failed to save topography:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def save_mosaic_plot(self):
+        """Save the mosaic plot for a specific range."""
+        try:
+            n_epochs = self.get_n_epochs()
+            if n_epochs == 0:
+                print("No epochs to save.")
+                return
+                
+            # 1. Ask for Start Epoch and Duration
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Save Mosaic Plot")
+            layout = QFormLayout(dialog)
+            
+            start_spin = QSpinBox()
+            start_spin.setRange(0, n_epochs - 1)
+            start_spin.setValue(self.current_epoch)
+            layout.addRow("Start Epoch:", start_spin)
+            
+            duration_spin = QSpinBox()
+            duration_spin.setRange(1, n_epochs)
+            duration_spin.setValue(15)  # Default duration
+            layout.addRow("Duration (epochs):", duration_spin)
+            
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | 
+                                     QDialogButtonBox.StandardButton.Cancel)
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            layout.addRow(buttons)
+            
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            
+            start_epoch = start_spin.value()
+            duration = duration_spin.value()
+            
+            # 2. Ask for file path
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Mosaic Plot", "", 
+                "PNG Image (*.png);;JPEG Image (*.jpg);;PDF Document (*.pdf)"
+            )
+            
+            if not file_path:
+                return
+                
+            # 3. Create temporary figure
+            # Width depends on duration, height on vertical size
+            # Approx 1 second per inch width might be good, or fixed size
+            width = max(10, min(duration, 30)) # dynamic width
+            fig = Figure(figsize=(width, 8), facecolor='white')
+            ax = fig.add_subplot(111)
+            
+            # 4. Plot data
+            self.mosaic_plotter.plot_data(
+                ax=ax,
+                start_epoch=start_epoch,
+                n_epochs_to_show=duration,
+                theme_colors={'bg_primary': '#ffffff', 'fg_primary': '#000000'}
+            )
+            
+            # 5. Save
+            canvas = FigureCanvas(fig)
+            fig.savefig(file_path, dpi=300, bbox_inches='tight')
+            
+            self.show_message_box(QMessageBox.Icon.Information, 
+                                "Success", f"Mosaic plot saved to:\n{file_path}")
+                                
+        except Exception as e:
+            self.show_message_box(QMessageBox.Icon.Critical, 
+                                "Error", f"Failed to save mosaic plot:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def save_power_analysis(self):
+        """Export power analysis for all epochs."""
+        try:
+            if self.df.empty:
+                return
+                
+            # 1. Ask for Frequency Band
+            bands = list(self.topo_widget.FREQ_BANDS.keys()) + ["Custom"]
+            band_name, ok = QInputDialog.getItem(
+                self, "Select Band", 
+                "Frequency Band:", bands, 0, False
+            )
+            
+            if not ok or not band_name:
+                return
+                
+            # Determine frequency range
+            if band_name == "Custom":
+                # We need a custom dialog for this, reusing topowindow's dialog?
+                # For simplicity, let's just ask for Low and High HZ
+                low, ok1 = QInputDialog.getDouble(self, "Custom Band", "Low Frequency (Hz):", 5, 0.1, 200, 1)
+                if not ok1: return
+                high, ok2 = QInputDialog.getDouble(self, "Custom Band", "High Frequency (Hz):", 15, 0.1, 200, 1)
+                if not ok2: return
+                freq_band = (low, high)
+            else:
+                info = self.topo_widget.FREQ_BANDS[band_name]
+                freq_band = (info[0], info[1])
+            
+            # 2. Ask for file path
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Power Analysis", "", 
+                "CSV File (*.csv)"
+            )
+            
+            if not file_path:
+                return
+                
+            # 3. Compute power for all epochs
+            n_epochs = self.get_n_epochs()
+            results = []
+            
+            # Simple progress dialog
+            from PyQt6.QtWidgets import QProgressDialog
+            progress = QProgressDialog("Computing power analysis...", "Cancel", 0, n_epochs, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            
+            for i in range(n_epochs):
+                if progress.wasCanceled():
+                    return
+                progress.setValue(i)
+                
+                # Get epoch data
+                epoch_data = self.get_epoch_data(i)
+                if epoch_data is None:
+                    continue
+                
+                powers = self.topo_widget.compute_psd_power(epoch_data, freq_band)
+                
+                # Add epoch index
+                powers['epoch'] = i
+                results.append(powers)
+            
+            progress.setValue(n_epochs)
+            
+            # 4. Create DataFrame and Save
+            if not results:
+                self.show_message_box(QMessageBox.Icon.Warning, "No Data", "No power data computed.")
+                return
+
+            df_results = pd.DataFrame(results)
+            
+            # Reorder columns: epoch first, then electrodes sorted
+            cols = ['epoch'] + sorted([c for c in df_results.columns if c != 'epoch'])
+            df_results = df_results[cols]
+            
+            df_results.to_csv(file_path, index=False)
+            
+            self.show_message_box(QMessageBox.Icon.Information, 
+                                "Success", f"Power analysis saved to:\n{file_path}\n\n"
+                                          f"Band: {band_name} {freq_band} Hz\n"
+                                          f"Epochs: {len(df_results)}")
+                                          
+        except Exception as e:
+            self.show_message_box(QMessageBox.Icon.Critical, 
+                                "Error", f"Failed to save analysis:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
 
