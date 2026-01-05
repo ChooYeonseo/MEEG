@@ -1,0 +1,196 @@
+{
+  "electrode_positions": [
+    {
+      "name": "Fz",
+      "number": 1,
+      "x": -0.001,
+      "y": 0.023
+    },
+    {
+      "name": "Pz",
+      "number": 2,
+      "x": 0.0,
+      "y": -4.0
+    },
+    {
+      "name": "P4",
+      "number": 3,
+      "x": 2.0,
+      "y": -4.0
+    },
+    {
+      "name": "P3",
+      "number": 4,
+      "x": -2.0,
+      "y": -4.0
+    },
+    {
+      "name": "T2",
+      "number": 5,
+      "x": 1.0,
+      "y": -5.0
+    },
+    {
+      "name": "T6",
+      "number": 6,
+      "x": 3.0,
+      "y": -5.0
+    },
+    {
+      "name": "O2",
+      "number": 7,
+      "x": 1.0,
+      "y": -6.0
+    },
+    {
+      "name": "T5",
+      "number": 8,
+      "x": -3.0,
+      "y": -5.0
+    },
+    {
+      "name": "T1",
+      "number": 9,
+      "x": -1.0,
+      "y": -5.0
+    },
+    {
+      "name": "O1",
+      "number": 10,
+      "x": -1.0,
+      "y": -6.0
+    },
+    {
+      "name": "C2",
+      "number": 11,
+      "x": 1.0,
+      "y": -2.0
+    },
+    {
+      "name": "C1",
+      "number": 12,
+      "x": -1.0,
+      "y": -2.0
+    },
+    {
+      "name": "F3",
+      "number": 13,
+      "x": -2.0,
+      "y": 0.0
+    },
+    {
+      "name": "F4",
+      "number": 14,
+      "x": 2.0,
+      "y": 0.0
+    },
+    {
+      "name": "Fp2",
+      "number": 15,
+      "x": 1.0,
+      "y": 1.0
+    },
+    {
+      "name": "Fp1",
+      "number": 16,
+      "x": -1.0,
+      "y": 1.0
+    }
+  ],
+  "channel_mapping": {
+    "3": "B-008",
+    "11": "B-009",
+    "14": "B-010",
+    "15": "B-011",
+    "2": "B-012",
+    "10": "B-013",
+    "9": "B-014",
+    "8": "B-015",
+    "4": "B-016",
+    "12": "B-017",
+    "13": "B-018",
+    "16": "B-019",
+    "1": "B-020",
+    "7": "B-021",
+    "6": "B-023"
+  },
+  "mosaic_relationships": [
+    {
+      "name": "Fp1-F3",
+      "electrode_a": 16,
+      "electrode_b": 13
+    },
+    {
+      "name": "F3-P3",
+      "electrode_a": 13,
+      "electrode_b": 4
+    },
+    {
+      "name": "P3-T5",
+      "electrode_a": 4,
+      "electrode_b": 8
+    },
+    {
+      "name": "T5-O1",
+      "electrode_a": 8,
+      "electrode_b": 10
+    },
+    {
+      "name": "Fp1-C1",
+      "electrode_a": 16,
+      "electrode_b": 12
+    },
+    {
+      "name": "C1-T1",
+      "electrode_a": 12,
+      "electrode_b": 9
+    },
+    {
+      "name": "T1-O1",
+      "electrode_a": 9,
+      "electrode_b": 10
+    },
+    {
+      "name": "Fz-Pz",
+      "electrode_a": 1,
+      "electrode_b": 2
+    },
+    {
+      "name": "Fp2-C2",
+      "electrode_a": 15,
+      "electrode_b": 11
+    },
+    {
+      "name": "C2-O2",
+      "electrode_a": 11,
+      "electrode_b": 7
+    },
+    {
+      "name": "Fp2-F4",
+      "electrode_a": 15,
+      "electrode_b": 14
+    },
+    {
+      "name": "F4-P4",
+      "electrode_a": 14,
+      "electrode_b": 3
+    },
+    {
+      "name": "P4-T6",
+      "electrode_a": 3,
+      "electrode_b": 6
+    },
+    {
+      "name": "T6-O2",
+      "electrode_a": 6,
+      "electrode_b": 7
+    }
+  ],
+  "metadata": {
+    "description": "MEEG Mosaic Configuration",
+    "version": "1.0",
+    "total_electrodes": 16,
+    "mapped_electrodes": 15,
+    "relationships": 14
+  }
+}

@@ -1385,11 +1385,10 @@ class ElectrodeMappingWindow(QWidget):
             QMessageBox.warning(self, "No Data", "No data available for analysis.")
             return
             
-        # Create and show the integrated data view window
-        # If no mosaic relationships exist, it will operate in single electrode mode
+        # Create and show the newly adapted preview window
         try:
-            from .integrated_data_view import LabelingWindow
-            self.labeling_window = LabelingWindow(
+            from .preview.preview_main import PreviewWindow
+            self.labeling_window = PreviewWindow(
                 mosaic_relationships=self.mosaic_relationships,
                 electrode_positions=self.electrode_positions,
                 current_data=self.current_data,

@@ -6,6 +6,7 @@ preprocessing methods before caching the data.
 """
 
 import sys
+import gc
 from pathlib import Path
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget, 
                             QListWidgetItem, QPushButton, QLabel, QGroupBox,
@@ -28,7 +29,8 @@ try:
     from data_format_converter import (
         prepare_data_for_preprocessing, 
         finalize_processed_data, 
-        convert_rhd_result_to_dataframe
+        convert_rhd_result_to_dataframe,
+        convert_dataframe_to_rhd_result
     )
     from theme.preferences import preferences_manager
 except ImportError as e:
@@ -64,66 +66,130 @@ class PreprocessingWorker(QThread):
     progress_update = pyqtSignal(str)
     step_completed = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
-    finished_processing = pyqtSignal(object)  # Processed data
+    finished_processing = pyqtSignal(object)  # Processed data (metadata only)
     
-    def __init__(self, data, pipeline, sampling_rate=None):
+    def __init__(self, data, pipeline, directory_path, sampling_rate=None):
         super().__init__()
         self.data = data
         self.pipeline = pipeline
+        self.directory_path = directory_path
         self.sampling_rate = sampling_rate
     
     def run(self):
         """Run the preprocessing pipeline."""
         try:
             # First, prepare data for preprocessing (convert to DataFrame format)
-            from data_format_converter import prepare_data_for_preprocessing, finalize_processed_data
-            # Import signal_preprocessing for get_sampling_rate function
+            # data_format_converter methods already imported at module level
             import signal_preprocessing
+            from data_format_converter import create_minimal_metadata
+            import pandas as pd
             
-            self.progress_update.emit("Preparing data for preprocessing...")
-            prepared_data = prepare_data_for_preprocessing(self.data)
+            # Initialize cache session
+            cache_key, cache_path = cache_manager.init_cache_session(self.directory_path)
+            self.progress_update.emit(f"Initialized cache session: {cache_key}")
             
-            processed_data = []
+            files_metadata = []
+            final_lightweight_results = []
             
-            for i, (filename, data_df, data_present, original_result) in enumerate(prepared_data):
-                if not data_present or data_df is None:
-                    processed_data.append((filename, data_df, data_present, original_result))
+            total_files = len(self.data)
+            
+            for i, (filename, result, data_present) in enumerate(self.data):
+                self.progress_update.emit(f"Processing {filename} ({i+1}/{total_files})")
+                
+                # 1. Prepare Data Logic (Lazy Loading)
+                if not data_present or not result:
+                    # Save empty result to cache for consistency
+                    file_meta = cache_manager.save_file_to_cache(cache_path, filename, i, result, data_present)
+                    files_metadata.append(file_meta)
+                    final_lightweight_results.append((filename, result, data_present))
                     continue
-                
-                self.progress_update.emit(f"Processing {filename} ({i+1}/{len(prepared_data)})")
-                
+
+                try:
+                    # Check if this is CSV data (DataFrame) or RHD data (dict)
+                    if isinstance(result, pd.DataFrame):
+                        # CSV data
+                        data_df = result
+                        # Create minimal metadata from DataFrame
+                        original_result = create_minimal_metadata(result)
+                    else:
+                        # RHD data
+                        original_result = result
+                        data_df = convert_rhd_result_to_dataframe(result)
+                        
+                except Exception as e:
+                    print(f"Warning: Could not convert {filename} to DataFrame: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Skip this file but keep index consistent
+                    continue
+
+                # 2. Process Data
                 # Get the initial sampling rate for this file
                 fs = self.sampling_rate
                 if original_result and 'frequency_parameters' in original_result:
                     fs = original_result['frequency_parameters'].get('amplifier_sample_rate', fs)
                 
-                # Apply pipeline to the DataFrame
-                processed_df = data_df.copy()
+                processed_df = data_df
                 current_fs = fs  # Track current sampling rate through pipeline
                 
-                for step in self.pipeline:
-                    if step.enabled:
-                        self.step_completed.emit(f"Applying {step.name} to {filename}")
-                        processed_df = step.apply(processed_df, current_fs)
-                        
-                        # If this was a resampling step, recalculate the sampling rate
-                        if hasattr(step.function, '__name__') and step.function.__name__ == 'resample_dataframe':
-                            # Get the new sampling rate from the step parameters
-                            if 'target_rate' in step.parameters:
-                                current_fs = step.parameters['target_rate']
-                                self.step_completed.emit(f"Sampling rate updated to {current_fs} Hz after resampling")
-                            else:
-                                # If no target rate specified, recalculate from data
-                                current_fs = signal_preprocessing.get_sampling_rate(processed_df)
-                                self.step_completed.emit(f"Sampling rate recalculated to {current_fs} Hz after resampling")
+                try:
+                    for step in self.pipeline:
+                        if step.enabled:
+                            self.step_completed.emit(f"Applying {step.name} to {filename}")
+                            processed_df = step.apply(processed_df, current_fs)
+                            
+                            # If this was a resampling step, recalculate the sampling rate
+                            if hasattr(step.function, '__name__') and step.function.__name__ == 'resample_dataframe':
+                                if 'target_rate' in step.parameters:
+                                    current_fs = step.parameters['target_rate']
+                                    self.step_completed.emit(f"Sampling rate updated to {current_fs} Hz after resampling")
+                                else:
+                                    current_fs = signal_preprocessing.get_sampling_rate(processed_df)
+                                    self.step_completed.emit(f"Sampling rate recalculated to {current_fs} Hz after resampling")
+                    
+                    # 3. Convert back and Save
+                    # Convert processed DataFrame directly back to RHD result format
+                    updated_result = convert_dataframe_to_rhd_result(processed_df, original_result, current_fs)
+                    
+                    # Save IMMEDIATELY to cache
+                    self.step_completed.emit(f"Saving {filename} to cache...")
+                    file_meta = cache_manager.save_file_to_cache(cache_path, filename, i, updated_result, data_present)
+                    files_metadata.append(file_meta)
+                    
+                    # Create a lightweight result (metadata only) for the UI return value
+                    lightweight_result = {}
+                    if 'frequency_parameters' in updated_result:
+                        lightweight_result['frequency_parameters'] = updated_result['frequency_parameters']
+                    if 'amplifier_channels' in updated_result:
+                        lightweight_result['amplifier_channels'] = updated_result['amplifier_channels']
+                    
+                    # Add other non-array data
+                    for key, value in updated_result.items():
+                        if key not in ['amplifier_data', 'aux_input_data', 'board_adc_data', 't_amplifier', 't_aux_input', 'time']:
+                             lightweight_result[key] = value
+                    
+                    final_lightweight_results.append((filename, lightweight_result, data_present))
                 
-                processed_data.append((filename, processed_df, data_present, original_result, current_fs))
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    self.error_occurred.emit(f"Error processing {filename}: {str(e)}")
+                    # Skip saving if processing failed to avoid corrupted cache
+
+                # 4. Aggressive memory cleanup
+                # Explicitly delete large objects
+                del processed_df
+                if 'updated_result' in locals(): del updated_result
+                if isinstance(result, dict) and 'data_df' in locals(): del data_df 
+                
+                # Force garbage collection
+                gc.collect()
             
-            # Convert processed DataFrames back to RHD result format
-            self.progress_update.emit("Converting processed data back to cache format...")
-            final_data = finalize_processed_data(processed_data)
+            # Finalize cache session
+            self.progress_update.emit("Finalizing cache...")
+            cache_manager.finalize_cache_session(cache_path, self.directory_path, files_metadata)
             
-            self.finished_processing.emit(final_data)
+            self.finished_processing.emit(final_lightweight_results)
             
         except Exception as e:
             import traceback
@@ -210,22 +276,7 @@ class PreprocessingPipelineDialog(QDialog):
             list_text = NORMAL_COLORS['fg_primary']
         
         # Stylesheet with default text color that can be overridden by setForeground
-        self.available_methods.setStyleSheet(f"""
-            QListWidget {{
-                background-color: {list_bg};
-                color: {list_text};
-                border: 1px solid {list_border};
-                border-radius: 4px;
-                padding: 4px;
-            }}
-            QListWidget::item {{
-                padding: 4px;
-                border-radius: 2px;
-            }}
-            QListWidget::item:selected {{
-                background-color: {list_selection};
-            }}
-        """)
+        self.available_methods.setStyleSheet(f"QListWidget {{ background-color: {list_bg}; color: {list_text}; border: 1px solid {list_border}; border-radius: 4px; padding: 4px; }} QListWidget::item {{ padding: 4px; border-radius: 2px; }} QListWidget::item:selected {{ background-color: {list_selection}; }}")
         
         layout.addWidget(self.available_methods)
         
@@ -298,22 +349,7 @@ class PreprocessingPipelineDialog(QDialog):
             pipeline_text = NORMAL_COLORS['fg_primary']
         
         # Apply stylesheet with proper text color
-        self.pipeline_list.setStyleSheet(f"""
-            QListWidget {{
-                background-color: {pipeline_bg};
-                color: {pipeline_text};
-                border: 1px solid {pipeline_border};
-                border-radius: 4px;
-                padding: 4px;
-            }}
-            QListWidget::item {{
-                padding: 4px;
-                border-radius: 2px;
-            }}
-            QListWidget::item:selected {{
-                background-color: {pipeline_selection};
-            }}
-        """)
+        self.pipeline_list.setStyleSheet(f"QListWidget {{ background-color: {pipeline_bg}; color: {pipeline_text}; border: 1px solid {pipeline_border}; border-radius: 4px; padding: 4px; }} QListWidget::item {{ padding: 4px; border-radius: 2px; }} QListWidget::item:selected {{ background-color: {pipeline_selection}; }}")
         
         pipeline_layout.addWidget(self.pipeline_list)
         
@@ -691,8 +727,8 @@ class PreprocessingPipelineDialog(QDialog):
                 sampling_rate = result['frequency_parameters'].get('amplifier_sample_rate')
                 break
         
-        # Start worker thread
-        self.worker = PreprocessingWorker(self.data, self.pipeline, sampling_rate)
+        # Start worker thread - Pass directory_path
+        self.worker = PreprocessingWorker(self.data, self.pipeline, self.directory_path, sampling_rate)
         self.worker.progress_update.connect(self.progress_label.setText)
         self.worker.step_completed.connect(lambda msg: print(msg))
         self.worker.error_occurred.connect(self.on_processing_error)
@@ -712,29 +748,24 @@ class PreprocessingPipelineDialog(QDialog):
     
     def on_processing_finished(self, processed_data):
         """Handle completion of preprocessing."""
+        # This processed_data is now lightweight (no arrays)
         self.processed_data = processed_data
         
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        self.progress_label.setText("Processing complete! Saving to cache...")
+        self.progress_label.setText("Processing complete! Data cached.")
         
-        try:
-            # Save processed data to cache
-            cache_manager.save_to_cache(self.directory_path, processed_data)
-            
-            self.progress_label.setText("Processing and caching complete!")
-            
-            QMessageBox.information(
-                self,
-                "Success",
-                "Preprocessing pipeline completed successfully!\n\n"
-                "The processed data has been saved to cache."
-            )
-            
-            self.accept()  # Close dialog with success
-            
-        except Exception as e:
-            self.on_processing_error(f"Error saving to cache: {str(e)}")
+        # NOTE: We do NOT call cache_manager.save_to_cache here anymore,
+        # because PreprocessingWorker has already saved it incrementally!
+        
+        QMessageBox.information(
+            self,
+            "Success",
+            "Preprocessing pipeline completed successfully!\n\n"
+            "The processed data has been saved to cache."
+        )
+        
+        self.accept()  # Close dialog with success
     
     def get_processed_data(self):
         """Get the processed data."""
@@ -800,60 +831,72 @@ class ParameterConfigDialog(QDialog):
         button_layout = QHBoxLayout()
         
         ok_button = QPushButton("OK")
-        cancel_button = QPushButton("Cancel")
-        
-        ok_button.clicked.connect(self.accept)
-        cancel_button.clicked.connect(self.reject)
-        
+        ok_button.clicked.connect(self.accept_parameters)
         ok_button.setDefault(True)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
         
         button_layout.addStretch()
         button_layout.addWidget(ok_button)
         button_layout.addWidget(cancel_button)
         
         layout.addLayout(button_layout)
-    
-    def create_parameter_widget(self, param_name, param_config):
-        """Create appropriate widget for parameter type."""
-        param_type = param_config['type']
-        current_value = self.step.parameters.get(param_name, param_config['default'])
         
-        if param_type == 'int':
+    def create_parameter_widget(self, param_name, param_config):
+        """Create a widget for a parameter based on its type."""
+        param_type = param_config.get('type', 'str')
+        current_value = self.step.parameters.get(param_name, param_config.get('default'))
+        
+        if param_type == 'bool':
+            widget = QCheckBox()
+            widget.setChecked(bool(current_value))
+            return widget
+            
+        elif param_type == 'int':
             widget = QSpinBox()
-            widget.setRange(param_config.get('min', -1000000), 
-                           param_config.get('max', 1000000))
-            widget.setValue(current_value)
+            widget.setRange(param_config.get('min', -999999), param_config.get('max', 999999))
+            widget.setValue(int(current_value))
+            return widget
             
         elif param_type == 'float':
             widget = QDoubleSpinBox()
-            widget.setRange(param_config.get('min', -1000000.0), 
-                           param_config.get('max', 1000000.0))
-            widget.setDecimals(3)
-            widget.setValue(current_value)
-            
-        elif param_type == 'bool':
-            widget = QCheckBox()
-            widget.setChecked(current_value)
-            
-        else:
-            # Default to spin box for unknown types
-            widget = QDoubleSpinBox()
+            widget.setRange(param_config.get('min', -999999.0), param_config.get('max', 999999.0))
+            widget.setDecimals(param_config.get('decimals', 2))
             widget.setValue(float(current_value))
-        
-        return widget
-    
-    def accept(self):
-        """Accept the configuration and update the step."""
+            return widget
+            
+        elif param_type == 'choice':
+            widget = QComboBox()
+            widget.addItems(param_config.get('choices', []))
+            widget.setCurrentText(str(current_value))
+            return widget
+            
+        else: # str or unknown
+            from PyQt6.QtWidgets import QLineEdit
+            widget = QLineEdit()
+            widget.setText(str(current_value))
+            return widget
+            
+    def accept_parameters(self):
+        """Save the configured parameters."""
         # Update enabled state
         self.step.enabled = self.enabled_checkbox.isChecked()
         
         # Update parameters
         for param_name, widget in self.parameter_widgets.items():
-            if isinstance(widget, QSpinBox):
-                self.step.parameters[param_name] = widget.value()
-            elif isinstance(widget, QDoubleSpinBox):
-                self.step.parameters[param_name] = widget.value()
-            elif isinstance(widget, QCheckBox):
+            param_config = self.method_def['parameters'][param_name]
+            param_type = param_config.get('type', 'str')
+            
+            if param_type == 'bool':
                 self.step.parameters[param_name] = widget.isChecked()
+            elif param_type == 'int':
+                self.step.parameters[param_name] = widget.value()
+            elif param_type == 'float':
+                self.step.parameters[param_name] = widget.value()
+            elif param_type == 'choice':
+                self.step.parameters[param_name] = widget.currentText()
+            else:
+                self.step.parameters[param_name] = widget.text()
         
-        super().accept()
+        self.accept()
