@@ -397,7 +397,7 @@ class TopographyWidget(QWidget):
             # Find power in the specified frequency band
             band_mask = (frequencies >= low_hz) & (frequencies <= high_hz)
             if band_mask.any():
-                band_power = np.mean(psd[band_mask])
+                band_power = np.sum(psd[band_mask])
                 power_values_raw[channel] = band_power
         
         # Fill in missing electrodes by interpolation
@@ -788,4 +788,3 @@ class TopographyWidget(QWidget):
     def set_epoch_length(self, epoch_length):
         """Set the epoch length."""
         self.epoch_length = epoch_length
-
