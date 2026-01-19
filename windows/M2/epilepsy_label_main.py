@@ -152,12 +152,13 @@ class EpilepsyLabelWindow(QWidget):
     """Main window for seizure/epilepsy labeling."""
     
     def __init__(self, electrode_positions=None, current_data=None, 
-                 channel_mapping=None, mosaic_relationships=None, parent=None):
+                 channel_mapping=None, mosaic_relationships=None, cache_key=None, parent=None):
         super().__init__(parent)
         self.electrode_positions = electrode_positions or []
         self.current_data = current_data
         self.channel_mapping = channel_mapping or {}
         self.mosaic_relationships = mosaic_relationships or []
+        self.cache_key = cache_key
         
         # Load theme colors
         self.load_theme()
@@ -511,6 +512,12 @@ class EpilepsyLabelWindow(QWidget):
         save_power_action.setShortcut(QKeySequence("Ctrl+E"))
         save_power_action.triggered.connect(self.save_power_analysis)
         save_menu.addAction(save_power_action)
+
+        # File to DB (Ctrl+D)
+        save_db_action = QAction("File to DB", self)
+        save_db_action.setShortcut(QKeySequence("Ctrl+D"))
+        save_db_action.triggered.connect(self.save_file_to_db)
+        save_menu.addAction(save_db_action)
         
         main_layout.setMenuBar(menu_bar)
         
@@ -1391,6 +1398,142 @@ class EpilepsyLabelWindow(QWidget):
         except Exception as e:
             self.show_message_box(QMessageBox.Icon.Critical, 
                                 "Error", f"Failed to save analysis:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def save_file_to_db(self):
+        """Save ALL epochs data to CSV files for DB import."""
+        try:
+            if self.df.empty:
+                self.show_message_box(QMessageBox.Icon.Warning, "No Data", "No data available to save.")
+                return
+
+            # 1. Ask for Data ID (e.g. M25001)
+            data_id, ok = QInputDialog.getText(
+                self, "File to DB", 
+                "Data ID (ex. M25001):"
+            )
+            if not ok or not data_id:
+                return
+
+            # 2. Ask for float approximation digits (precision)
+            precision, ok = QInputDialog.getInt(
+                self, "File to DB",
+                "Decimal Precision (digits under .):",
+                4, 0, 20, 1
+            )
+            if not ok:
+                return
+
+            # 3. Ask for output directory
+            directory = QFileDialog.getExistingDirectory(
+                self, "Select Output Directory for CSV Files"
+            )
+            if not directory:
+                return
+
+            # Get total epochs
+            n_epochs = self.get_n_epochs()
+            if n_epochs == 0:
+                 self.show_message_box(QMessageBox.Icon.Warning, "No Data", "No epochs found.")
+                 return
+
+            # Progress Dialog
+            from PyQt6.QtWidgets import QProgressDialog
+            progress = QProgressDialog("Saving all epochs to CSV...", "Cancel", 0, n_epochs, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            
+            saved_count = 0
+            from pathlib import Path
+            save_dir = Path(directory)
+            
+            # Loop through ALL epochs
+            for epoch_idx in range(n_epochs):
+                if progress.wasCanceled():
+                    break
+                
+                progress.setValue(epoch_idx)
+                
+                # Get epoch data
+                epoch_data = self.get_epoch_data(epoch_idx)
+                if epoch_data is None:
+                    continue
+                
+                # Format epoch number string
+                epoch_str = f"EP{epoch_idx:06d}"
+                
+                for channel_name in epoch_data.columns:
+                    # Construct filename: DataID + ChannelName + EP + number
+                    file_name = f"{data_id}_{channel_name}_{epoch_str}.csv"
+                    file_path = save_dir / file_name
+                    
+                    # Get data for this channel
+                    channel_data = epoch_data[channel_name]
+                    
+                    # Round
+                    channel_data_rounded = channel_data.round(precision)
+                    
+                    # Save
+                    channel_data_rounded.to_csv(file_path, index=False, header=False)
+                    saved_count += 1
+            
+            progress.setValue(n_epochs)
+
+            # Save Labels with custom header
+            label_file = save_dir / f"{data_id}_labels.csv"
+            
+            try:
+                # Get current labels from widget
+                labels = self.label_widget.get_labels()
+                if len(labels) != n_epochs:
+                     # Fallback if label widget not sync (shouldn't happen)
+                     labels = [0] * n_epochs
+                
+                # Create DataFrame with 'epoch' and custom label column name
+                df_labels = pd.DataFrame({
+                    'epoch': np.arange(n_epochs),
+                    data_id: labels
+                })
+                
+                # Save label file
+                df_labels.to_csv(label_file, index=False)
+                saved_count += 1
+                
+            except Exception as e:
+                print(f"Error saving label file: {e}")
+                
+            if saved_count > 0:
+                self.show_message_box(QMessageBox.Icon.Information, 
+                                    "Success", 
+                                    f"Saved {saved_count} files to:\n{directory}\n\n"
+                                    f"Covered {n_epochs} epochs + Labels.")
+                
+                # Cache Deletion Option
+                if self.cache_key:
+                    reply = QMessageBox.question(
+                        self, "Delete Cache?", 
+                        "Do you want to delete the original cache to save space?\n"
+                        "Since data is now saved to DB format, the cache might be redundant.\n\n"
+                        "WARNING: This action cannot be undone!",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                        QMessageBox.StandardButton.No
+                    )
+                    
+                    if reply == QMessageBox.StandardButton.Yes:
+                        try:
+                            from utils.cache_manager import cache_manager
+                            cache_manager.remove_cached_project(self.cache_key)
+                            self.show_message_box(QMessageBox.Icon.Information, "Cache Deleted", 
+                                                "Original cache has been successfully removed.")
+                        except Exception as e:
+                            self.show_message_box(QMessageBox.Icon.Critical, "Error", 
+                                                f"Failed to delete cache:\n{str(e)}")
+            else:
+                 self.show_message_box(QMessageBox.Icon.Warning, "Cancelled", "Operation cancelled or no files saved.")
+            
+        except Exception as e:
+            self.show_message_box(QMessageBox.Icon.Critical, 
+                                "Error", f"Failed to save to DB format:\n{str(e)}")
             import traceback
             traceback.print_exc()
 

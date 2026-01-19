@@ -1341,6 +1341,7 @@ class ElectrodeMappingWindow(QWidget):
                             current_data=self.current_data,
                             channel_mapping=self.channel_mapping,
                             mosaic_relationships=self.mosaic_relationships,
+                            cache_key=self.cache_key,
                             parent=None
                         )
                     elif method == "Movement Label":
