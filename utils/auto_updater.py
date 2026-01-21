@@ -205,56 +205,92 @@ class AutoUpdater(QObject):
         
         msg_box.exec()
         
-        if msg_box.clickedButton() == update_btn and url:
-            self._download_and_update(url, version)
+        if msg_box.clickedButton() == update_btn:
+            self._apply_update(version)
     
-    def _download_and_update(self, url: str, version: str):
-        """Download and apply update."""
-        if not HAS_REQUESTS:
+    def _apply_update(self, version: str):
+        """Apply update using git pull and restart the application."""
+        try:
+            # Get the project root directory
+            project_root = Path(__file__).parent.parent
+            
+            print(f"[Update] Applying update to v{version}...")
+            print(f"[Update] Project root: {project_root}")
+            
+            # Check if this is a git repository
+            git_dir = project_root / ".git"
+            if not git_dir.exists():
+                QMessageBox.warning(
+                    None,
+                    "Update Failed",
+                    "This is not a git repository. Cannot apply automatic updates.\n"
+                    "Please manually download the latest version from GitHub."
+                )
+                return
+            
+            # Run git pull
+            print("[Update] Running git pull...")
+            result = subprocess.run(
+                ["git", "pull", "origin", "main"],
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode != 0:
+                # Try with master branch if main fails
+                result = subprocess.run(
+                    ["git", "pull", "origin", "master"],
+                    cwd=str(project_root),
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+            
+            if result.returncode == 0:
+                print(f"[Update] Git pull successful: {result.stdout}")
+                
+                # Ask user to restart
+                reply = QMessageBox.information(
+                    None,
+                    "Update Complete",
+                    f"Successfully updated to v{version}!\n\n"
+                    "The application needs to restart to apply changes.\n"
+                    "Click OK to restart now.",
+                    QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel
+                )
+                
+                if reply == QMessageBox.StandardButton.Ok:
+                    # Restart the application
+                    print("[Update] Restarting application...")
+                    python = sys.executable
+                    main_script = project_root / "meeg.py"
+                    subprocess.Popen([python, str(main_script)])
+                    sys.exit(0)
+            else:
+                error_msg = result.stderr or result.stdout or "Unknown error"
+                print(f"[Update] Git pull failed: {error_msg}")
+                QMessageBox.warning(
+                    None,
+                    "Update Failed",
+                    f"Could not apply update:\n{error_msg}\n\n"
+                    "Please try running 'git pull' manually."
+                )
+                
+        except subprocess.TimeoutExpired:
+            print("[Update] Git pull timed out")
             QMessageBox.warning(
                 None,
                 "Update Failed",
-                "requests library not available for downloading update."
+                "Update timed out. Please try again or run 'git pull' manually."
             )
-            return
-        
-        try:
-            # Create temp directory for download
-            temp_dir = Path(tempfile.gettempdir()) / "meeg_update"
-            temp_dir.mkdir(exist_ok=True)
-            
-            # Get filename from URL
-            filename = url.split("/")[-1]
-            if not filename:
-                filename = f"MEEG_v{version}.zip"
-            
-            download_path = temp_dir / filename
-            
-            # Download with progress (simplified - no progress bar here)
-            response = requests.get(url, stream=True, timeout=60)
-            response.raise_for_status()
-            
-            with open(download_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            # Show success and open file location
-            QMessageBox.information(
-                None,
-                "Download Complete",
-                f"Update downloaded to:\n{download_path}\n\n"
-                "Please close the application and run the new version."
-            )
-            
-            # Open folder containing the download
-            if sys.platform == "win32":
-                subprocess.run(["explorer", "/select,", str(download_path)])
-            
         except Exception as e:
+            print(f"[Update] Error: {e}")
             QMessageBox.critical(
                 None,
-                "Download Failed",
-                f"Could not download update:\n{str(e)}"
+                "Update Failed",
+                f"Could not apply update:\n{str(e)}"
             )
 
 
