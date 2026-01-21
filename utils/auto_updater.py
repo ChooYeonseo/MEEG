@@ -51,15 +51,20 @@ class UpdateChecker(QThread):
     
     def run(self):
         """Check GitHub API for latest release."""
+        print(f"[Update Check] Checking for updates... (current: v{self.current_version})")
+        
         if not HAS_REQUESTS:
+            print("[Update Check] ERROR: requests library not installed")
             self.error.emit("requests library not installed. Cannot check for updates.")
             return
         
         try:
+            print(f"[Update Check] Fetching: {self.api_url}")
             response = requests.get(self.api_url, timeout=10)
             
             if response.status_code == 404:
                 # No releases yet
+                print("[Update Check] No releases found on GitHub")
                 self.no_update.emit()
                 return
             
@@ -68,6 +73,8 @@ class UpdateChecker(QThread):
             
             latest_version = release_data.get("tag_name", "").lstrip("v")
             release_notes = release_data.get("body", "No release notes available.")
+            
+            print(f"[Update Check] Latest version on GitHub: v{latest_version}")
             
             # Find the appropriate download asset (Windows exe)
             download_url = None
@@ -84,15 +91,20 @@ class UpdateChecker(QThread):
             
             # Compare versions
             if self._is_newer_version(latest_version, self.current_version):
+                print(f"[Update Check] UPDATE AVAILABLE: v{self.current_version} -> v{latest_version}")
                 self.update_available.emit(latest_version, release_notes, download_url or "")
             else:
+                print(f"[Update Check] You are running the latest version (v{self.current_version})")
                 self.no_update.emit()
                 
         except requests.RequestException as e:
+            print(f"[Update Check] Network error: {e}")
             self.error.emit(f"Network error: {str(e)}")
         except json.JSONDecodeError:
+            print("[Update Check] Invalid response from GitHub API")
             self.error.emit("Invalid response from GitHub API")
         except Exception as e:
+            print(f"[Update Check] Unexpected error: {e}")
             self.error.emit(f"Unexpected error: {str(e)}")
     
     def _is_newer_version(self, latest: str, current: str) -> bool:
@@ -160,6 +172,7 @@ class AutoUpdater(QObject):
     
     def _on_no_update(self):
         """Handle no update available."""
+        print(f"[Update Check] No update needed - running latest version")
         if not self._silent:
             QMessageBox.information(
                 None, 
@@ -169,6 +182,7 @@ class AutoUpdater(QObject):
     
     def _on_error(self, error_msg: str):
         """Handle update check error."""
+        print(f"[Update Check] Error: {error_msg}")
         if not self._silent:
             QMessageBox.warning(
                 None,
