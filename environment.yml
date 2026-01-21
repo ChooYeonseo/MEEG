@@ -19,13 +19,12 @@ dependencies:
   # GUI/Qt
   - pyqt>=6
 
-  # video processing
-  - opencv
-
   # utilities
   - tqdm
 
   # pip dependencies (not available on conda-forge or need specific versions)
   - pip:
-    - requests       # For GitHub API (auto-update)
-    - pyinstaller    # For building exe
+    - opencv-python   # Video processing (cv2)
+    - requests        # For GitHub API (auto-update)
+    - pyinstaller     # For building exe
+

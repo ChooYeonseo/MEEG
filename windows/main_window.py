@@ -193,6 +193,12 @@ class EEGMainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
         self.setStatusBar(self.status_bar)
         
+        # Add version label to status bar (right side)
+        from config import APP_VERSION
+        version_label = QLabel(f"v{APP_VERSION}")
+        version_label.setStyleSheet("color: gray; padding-right: 10px;")
+        self.status_bar.addPermanentWidget(version_label)
+        
     def setup_menu_bar(self):
         """Set up the application menu bar."""
         menubar = self.menuBar()
