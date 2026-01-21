@@ -2,6 +2,7 @@
 cache/*
 dist/*
 build/*
+releases/*
 # Python cache files
 __pycache__/
 *.pyc
