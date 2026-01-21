@@ -2,7 +2,7 @@
 """
 PyInstaller spec file for MEEG Application.
 
-This creates a macOS .app bundle (or Windows .exe on Windows).
+This creates a Windows .exe (or macOS .app bundle on macOS).
 Run with: pyinstaller MEEG.spec
 """
 
@@ -12,12 +12,14 @@ from pathlib import Path
 # Get the project root directory
 project_root = Path(SPECPATH)
 
+# Determine if running on Windows
+is_windows = sys.platform == 'win32'
+
 block_cipher = None
 
 # Data files to include
 added_files = [
-    # Assets
-    ('assets/img/Logo.png', 'assets/img'),
+    # Assets (including icon)
     ('assets', 'assets'),
     
     # Electrode map configuration files
@@ -26,13 +28,10 @@ added_files = [
     # Theme files
     ('theme', 'theme'),
     
-    # Data directory (for any required data files)
-    ('data', 'data'),
-    
     # Utils
     ('utils', 'utils'),
     
-    # Windows package
+    # Windows package (PyQt windows)
     ('windows', 'windows'),
     
     # Label directory
@@ -40,6 +39,9 @@ added_files = [
     
     # RHD loader
     ('load-rhd-notebook-python', 'load-rhd-notebook-python'),
+    
+    # Config file (for version info)
+    ('config.py', '.'),
 ]
 
 a = Analysis(
@@ -61,14 +63,18 @@ a = Analysis(
         'matplotlib.backends.backend_agg',
         'scipy',
         'scipy.signal',
+        'scipy.signal.windows',
         'scipy.interpolate',
         'scipy.spatial',
+        'scipy.stats',
         'cv2',
         'tqdm',
         'sklearn',
         'json',
         'hashlib',
         'requests',  # For auto-update
+        'pickle',
+        'openpyxl',
     ],
     hookspath=[],
     hooksconfig={},
@@ -94,11 +100,11 @@ exe = EXE(
     upx=True,
     console=False,  # Set to False for GUI app (no terminal window)
     disable_windowed_traceback=False,
-    argv_emulation=True,  # Important for macOS
+    argv_emulation=False if is_windows else True,  # Only for macOS
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/img/Logo.png',  # App icon
+    icon='assets/img/Logo.ico' if is_windows else 'assets/img/Logo.png',  # Windows uses ICO
 )
 
 coll = COLLECT(

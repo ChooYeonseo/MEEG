@@ -206,15 +206,104 @@ class AutoUpdater(QObject):
         msg_box.exec()
         
         if msg_box.clickedButton() == update_btn:
-            self._apply_update(version)
+            self._apply_update(version, url)
     
-    def _apply_update(self, version: str):
-        """Apply update using git pull and restart the application."""
+    def _is_frozen(self) -> bool:
+        """Check if running as a frozen exe (PyInstaller bundle)."""
+        return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+    
+    def _apply_update(self, version: str, download_url: str = ""):
+        """Apply update - uses git pull for source, downloads exe for frozen."""
+        if self._is_frozen():
+            self._apply_update_frozen(version, download_url)
+        else:
+            self._apply_update_source(version)
+    
+    def _apply_update_frozen(self, version: str, download_url: str):
+        """Apply update for frozen exe by downloading new version."""
+        print(f"[Update] Frozen mode - downloading new exe for v{version}...")
+        
+        if not download_url:
+            QMessageBox.warning(
+                None,
+                "Update Failed",
+                "No download URL available. Please download manually from GitHub."
+            )
+            return
+        
+        if not HAS_REQUESTS:
+            QMessageBox.warning(
+                None,
+                "Update Failed",
+                "requests library not available for downloading update."
+            )
+            return
+        
+        try:
+            # Get the application directory (where MEEG.exe is located)
+            app_dir = Path(sys.executable).parent
+            
+            # Create update directory
+            update_dir = app_dir / "MEEG_update"
+            update_dir.mkdir(exist_ok=True)
+            
+            # Get filename from URL
+            filename = download_url.split("/")[-1]
+            if not filename or "." not in filename:
+                filename = f"MEEG_v{version}.zip"
+            
+            download_path = update_dir / filename
+            
+            print(f"[Update] Downloading from: {download_url}")
+            print(f"[Update] Saving to: {download_path}")
+            
+            # Download the file
+            response = requests.get(download_url, stream=True, timeout=120)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            
+            with open(download_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        percent = (downloaded / total_size) * 100
+                        print(f"[Update] Downloaded: {percent:.1f}%", end='\r')
+            
+            print(f"\n[Update] Download complete: {download_path}")
+            
+            # Show success and open file location
+            QMessageBox.information(
+                None,
+                "Download Complete",
+                f"New version downloaded to:\n{download_path}\n\n"
+                "Please close this application and:\n"
+                "1. Extract the new version\n"
+                "2. Replace the old files with new ones\n"
+                "3. Run the new MEEG.exe"
+            )
+            
+            # Open folder containing the download
+            if sys.platform == "win32":
+                subprocess.run(["explorer", "/select,", str(download_path)])
+                
+        except Exception as e:
+            print(f"[Update] Error: {e}")
+            QMessageBox.critical(
+                None,
+                "Download Failed",
+                f"Could not download update:\n{str(e)}"
+            )
+    
+    def _apply_update_source(self, version: str):
+        """Apply update for source installation using git pull."""
         try:
             # Get the project root directory
             project_root = Path(__file__).parent.parent
             
-            print(f"[Update] Applying update to v{version}...")
+            print(f"[Update] Source mode - applying update to v{version}...")
             print(f"[Update] Project root: {project_root}")
             
             # Check if this is a git repository
