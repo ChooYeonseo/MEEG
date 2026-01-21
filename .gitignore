@@ -1,9 +1,7 @@
 # Ignore all contents inside the 'data' directory
 cache/*
 dist/*
-build/* 
-
-
+build/*
 # Python cache files
 __pycache__/
 *.pyc

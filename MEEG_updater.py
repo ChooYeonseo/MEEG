@@ -75,8 +75,15 @@ def extract_update(zip_path: Path, target_dir: Path, backup_dir: Path):
         else:
             source_dir = temp_extract
         
-        # Files/folders to preserve (don't delete or overwrite)
-        preserve = {'cache', 'MEEG_update', '_update_temp', 'MEEG_updater.exe'}
+        # Files/folders to preserve (don't delete or overwrite - user data!)
+        preserve = {
+            'cache',           # User's cached projects
+            'electrode_map',   # User's electrode configurations
+            'MEEG_update',     # Update downloads folder
+            '_update_temp',    # Temporary extraction folder
+            '_backup',         # Backup folder
+            'MEEG_updater.exe' # Updater itself (in case new version has issues)
+        }
         
         # Copy new files, backing up old ones
         for item in source_dir.iterdir():
