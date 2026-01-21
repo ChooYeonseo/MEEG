@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from scipy import signal
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QMessageBox
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QCursor
 
@@ -298,16 +298,24 @@ class LabelWidget(QWidget):
     # Signal emitted when spacebar is pressed (for video tab switch)
     spacebar_pressed = pyqtSignal(int)  # current epoch
     
+    # Special label for NaN (unusable data)
+    NAN_LABEL = 9  # Use 9 to represent NaN/unusable
+    
     def __init__(self, theme_colors=None, parent=None):
         super().__init__(parent)
         self.theme_colors = theme_colors or {'bg_primary': '#1a1a1a', 'fg_primary': '#ffffff'}
         self.n_epochs = 0
-        self.labels = np.array([])  # 0-8 Racine scores
+        self.labels = np.array([])  # 0-8 Racine scores, 9 = NaN
         self.current_epoch = 0
         self.epochs_to_show = 5
         self.mosaic_epochs_to_show = 15  # For < > key navigation
         
-        # Color scheme: green for 0, red gradient for 1-8
+        # Range selection state
+        self.range_start_epoch = None  # Set by Q key
+        self.range_end_epoch = None    # Set by W or E key
+        self.range_selection_active = False
+        
+        # Color scheme: green for 0, red gradient for 1-8, gray for NaN
         self.colors = self.generate_colors()
         
         self.init_ui()
@@ -344,7 +352,7 @@ class LabelWidget(QWidget):
         self.update_plot()
         
     def generate_colors(self):
-        """Generate color scheme: green for 0, red gradient for 1-8."""
+        """Generate color scheme: green for 0, red gradient for 1-8, gray for NaN."""
         colors = {}
         colors[0] = np.array([0.0, 0.8, 0.0, 1.0])  # Green
         
@@ -353,6 +361,9 @@ class LabelWidget(QWidget):
             # Darker red as score increases
             intensity = 1.0 - (i - 1) / 8.0 * 0.6  # From 1.0 to 0.4
             colors[i] = np.array([1.0, intensity * 0.2, intensity * 0.2, 1.0])
+        
+        # NaN color (gray with crosshatch pattern indicator)
+        colors[self.NAN_LABEL] = np.array([0.5, 0.5, 0.5, 1.0])  # Gray for NaN
             
         return colors
         
@@ -374,11 +385,37 @@ class LabelWidget(QWidget):
         # Handle number keys 0-8 for labeling
         if Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
             score = key - Qt.Key.Key_0
-            if score <= 8 and 0 <= self.current_epoch < self.n_epochs:
-                self.labels[self.current_epoch] = score
-                self.label_changed.emit(self.current_epoch, score)
-                # Stay on current epoch - only update color
-                self.update_plot()
+            if score <= 8:
+                self._apply_label(score)
+        
+        # N key - mark as NaN (unusable data)
+        elif key == Qt.Key.Key_N:
+            self._apply_label(self.NAN_LABEL)
+        
+        # Q key - set range start
+        elif key == Qt.Key.Key_Q:
+            self.range_start_epoch = self.current_epoch
+            self.range_end_epoch = None
+            self.range_selection_active = True
+            self.update_plot()
+            print(f"Range start set to epoch {self.range_start_epoch}")
+        
+        # W key - set range end and show message
+        elif key == Qt.Key.Key_W:
+            if self.range_start_epoch is not None:
+                self.range_end_epoch = self.current_epoch
+                self._show_range_selection_message()
+            else:
+                print("Press Q first to set range start")
+        
+        # E key - select to last epoch
+        elif key == Qt.Key.Key_E:
+            if self.range_start_epoch is not None:
+                self.range_end_epoch = self.n_epochs - 1
+                self._show_range_selection_message()
+            else:
+                print("Press Q first to set range start")
+        
         # Handle arrow keys for navigation
         elif key == Qt.Key.Key_Left and self.current_epoch > 0:
             self.current_epoch -= 1
@@ -410,9 +447,70 @@ class LabelWidget(QWidget):
         # Handle spacebar for video tab switch
         elif key == Qt.Key.Key_Space:
             self.spacebar_pressed.emit(self.current_epoch)
+        
+        # Escape key - cancel range selection
+        elif key == Qt.Key.Key_Escape:
+            self._cancel_range_selection()
         else:
             # Let parent handle other keys
             super().keyPressEvent(event)
+    
+    def _apply_label(self, score):
+        """Apply a label to current epoch or selected range."""
+        if self.range_selection_active and self.range_start_epoch is not None and self.range_end_epoch is not None:
+            # Apply to entire range
+            start = min(self.range_start_epoch, self.range_end_epoch)
+            end = max(self.range_start_epoch, self.range_end_epoch)
+            
+            for epoch_idx in range(start, end + 1):
+                if 0 <= epoch_idx < self.n_epochs:
+                    self.labels[epoch_idx] = score
+            
+            label_name = "NaN" if score == self.NAN_LABEL else str(score)
+            print(f"Applied label {label_name} to epochs {start}-{end} ({end - start + 1} epochs)")
+            
+            # Clear range selection
+            self._cancel_range_selection()
+            
+            # Emit signal for last epoch in range
+            self.label_changed.emit(end, score)
+            self.update_plot()
+        elif 0 <= self.current_epoch < self.n_epochs:
+            # Apply to single epoch
+            self.labels[self.current_epoch] = score
+            self.label_changed.emit(self.current_epoch, score)
+            self.update_plot()
+    
+    def _show_range_selection_message(self):
+        """Show message about selected range and prompt for label."""
+        if self.range_start_epoch is None or self.range_end_epoch is None:
+            return
+        
+        start = min(self.range_start_epoch, self.range_end_epoch)
+        end = max(self.range_start_epoch, self.range_end_epoch)
+        n_selected = end - start + 1
+        
+        self.update_plot()  # Update to show selection highlight
+        
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Range Selected")
+        msg.setText(f"You have selected {n_selected} epochs (epoch {start} to {end}).")
+        msg.setInformativeText("Press a number key (0-8) to label all selected epochs,\nor press N for NaN.\nPress ESC to cancel.")
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
+        
+        # Keep focus on this widget for label input
+        self.setFocus()
+        print(f"Range selected: epochs {start}-{end} ({n_selected} epochs). Press 0-8 or N to label.")
+    
+    def _cancel_range_selection(self):
+        """Cancel the current range selection."""
+        self.range_start_epoch = None
+        self.range_end_epoch = None
+        self.range_selection_active = False
+        self.update_plot()
+        print("Range selection cancelled")
             
     def update_plot(self):
         """Update the label display."""
@@ -437,7 +535,10 @@ class LabelWidget(QWidget):
         for i, epoch_idx in enumerate(range(start_epoch, end_epoch)):
             score = int(self.labels[epoch_idx])
             for row in range(9):
-                if row == score:
+                if score == self.NAN_LABEL:
+                    # NaN label - show gray across all rows
+                    label_img[row, i, :] = self.colors[self.NAN_LABEL]
+                elif row == score:
                     label_img[row, i, :] = self.colors[score]
                 else:
                     label_img[row, i, :] = [0.1, 0.1, 0.1, 1.0]  # Dark gray
@@ -446,6 +547,20 @@ class LabelWidget(QWidget):
         extent = [start_epoch, end_epoch, 0, 9]
         self.ax.imshow(label_img, aspect='auto', origin='lower', extent=extent,
                       interpolation='nearest')
+        
+        # Highlight range selection if active
+        if self.range_selection_active and self.range_start_epoch is not None:
+            range_start = self.range_start_epoch
+            range_end = self.range_end_epoch if self.range_end_epoch is not None else self.current_epoch
+            
+            # Ensure start <= end
+            r_start = min(range_start, range_end)
+            r_end = max(range_start, range_end)
+            
+            # Draw cyan highlight box for selected range
+            for r_epoch in range(r_start, r_end + 1):
+                if start_epoch <= r_epoch < end_epoch:
+                    self.ax.axvspan(r_epoch, r_epoch + 1, alpha=0.3, color='cyan', zorder=5)
         
         # Highlight current epoch
         self.ax.axvline(self.current_epoch + 0.5, color='yellow', linewidth=3, linestyle='-')

@@ -4,31 +4,20 @@ Video Sync Widget for MEEG Seizure Labeling.
 This module contains the video synchronization widget that allows users to
 upload a video, sync it with EEG data, and view video frames at specific epochs.
 Includes mosaic EEG display with time marker and combined video export.
+
+Uses OpenCV for reliable video playback across all systems.
 """
 
+import cv2
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QGroupBox, QFormLayout, QSlider,
                              QDoubleSpinBox, QFileDialog, QSizePolicy, QSplitter,
-                             QProgressDialog, QMessageBox)
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QTimer
-from PyQt6.QtGui import QFont, QKeyEvent
-
-# Try to import multimedia - it may not be available on all systems
-MULTIMEDIA_AVAILABLE = False
-try:
-    from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-    from PyQt6.QtMultimediaWidgets import QVideoWidget
-    MULTIMEDIA_AVAILABLE = True
-except ImportError:
-    print("WARNING: PyQt6 Multimedia not available. Video playback will be disabled.")
-    print("To enable video playback, install multimedia support:")
-    print("  pip install PyQt6-Qt6")
-    QMediaPlayer = None
-    QAudioOutput = None
-    QVideoWidget = None
+                             QProgressDialog, QMessageBox, QComboBox)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont, QKeyEvent, QImage, QPixmap
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -156,7 +145,7 @@ class MosaicTimelineWidget(QWidget):
 
 
 class VideoSyncWidget(QWidget):
-    """Widget for video playback synchronized with EEG epochs."""
+    """Widget for video playback synchronized with EEG epochs using OpenCV."""
     
     # Signal emitted when user wants to go back to label tab
     return_to_label = pyqtSignal()
@@ -172,15 +161,26 @@ class VideoSyncWidget(QWidget):
         self.sampling_rate = 1000.0  # Hz
         self.current_epoch = 0
         
+        # OpenCV video capture
+        self.cap = None
+        self.video_fps = 30.0
+        self.video_duration = 0.0
+        self.video_frame_count = 0
+        self.current_frame_idx = 0
+        self.is_playing = False
+        
+        # Window length for video display (±N seconds around current time)
+        self.video_window_length = 60.0  # Default ±60 seconds
+        
         # EEG data for mosaic display
         self.df = pd.DataFrame()
         self.mosaic_relationships = []
         self.electrode_positions = []
         self.last_displayed_epoch = -1  # Track epoch for topography updates
         
-        # Timer for syncing mosaic with video
-        self.sync_timer = QTimer()
-        self.sync_timer.timeout.connect(self.sync_mosaic_with_video)
+        # Timer for video playback
+        self.playback_timer = QTimer()
+        self.playback_timer.timeout.connect(self._update_frame)
         
         # Set focus policy for keyboard events
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -202,7 +202,7 @@ class VideoSyncWidget(QWidget):
         video_layout.setContentsMargins(0, 0, 0, 0)
         
         # Title
-        title_label = QLabel("Video Synchronization")
+        title_label = QLabel("Video Synchronization (OpenCV)")
         title_font = QFont()
         title_font.setPointSize(12)
         title_font.setBold(True)
@@ -210,41 +210,13 @@ class VideoSyncWidget(QWidget):
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         video_layout.addWidget(title_label)
         
-        # Video widget - only create if multimedia is available
-        if MULTIMEDIA_AVAILABLE:
-            self.video_widget = QVideoWidget()
-            self.video_widget.setMinimumHeight(300)
-            self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            video_layout.addWidget(self.video_widget)
-            
-            # Media player
-            self.media_player = QMediaPlayer()
-            self.audio_output = QAudioOutput()
-            self.media_player.setAudioOutput(self.audio_output)
-            self.media_player.setVideoOutput(self.video_widget)
-            
-            # Connect signals
-            self.media_player.positionChanged.connect(self.on_position_changed)
-            self.media_player.durationChanged.connect(self.on_duration_changed)
-            self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)
-        else:
-            # Fallback when multimedia is not available
-            self.video_widget = None
-            self.media_player = None
-            self.audio_output = None
-            
-            fallback_label = QLabel(
-                "⚠️ Video playback not available\n\n"
-                "PyQt6 Multimedia module is not installed.\n\n"
-                "To enable video playback, run:\n"
-                "pip install PyQt6-Qt6\n\n"
-                "The mosaic EEG display and topography\n"
-                "will still work without video."
-            )
-            fallback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            fallback_label.setStyleSheet("color: orange; font-size: 14px; padding: 20px;")
-            fallback_label.setMinimumHeight(300)
-            video_layout.addWidget(fallback_label)
+        # Video display label (for OpenCV frames)
+        self.video_label = QLabel("Load video to start")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_label.setMinimumHeight(400)
+        self.video_label.setStyleSheet("background-color: #222; color: white; font-size: 14px;")
+        self.video_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        video_layout.addWidget(self.video_label)
         
         # Playback controls
         controls_layout = QHBoxLayout()
@@ -260,6 +232,8 @@ class VideoSyncWidget(QWidget):
         self.seek_slider = QSlider(Qt.Orientation.Horizontal)
         self.seek_slider.setRange(0, 0)
         self.seek_slider.sliderMoved.connect(self.seek_position)
+        self.seek_slider.sliderPressed.connect(self._on_slider_pressed)
+        self.seek_slider.sliderReleased.connect(self._on_slider_released)
         controls_layout.addWidget(self.seek_slider, stretch=1)
         
         self.time_label = QLabel("00:00 / 00:00")
@@ -290,6 +264,15 @@ class VideoSyncWidget(QWidget):
         self.offset_spinbox.valueChanged.connect(self.on_offset_changed)
         sync_layout.addRow("Time Offset:", self.offset_spinbox)
         
+        # Window length selector
+        window_layout = QHBoxLayout()
+        self.window_length_combo = QComboBox()
+        self.window_length_combo.addItems(["±30 sec", "±45 sec", "±60 sec", "±90 sec", "±120 sec", "Full Video"])
+        self.window_length_combo.setCurrentIndex(2)  # Default ±60 sec
+        self.window_length_combo.currentTextChanged.connect(self._on_window_length_changed)
+        window_layout.addWidget(self.window_length_combo)
+        sync_layout.addRow("Display Window:", window_layout)
+        
         video_layout.addWidget(sync_group)
         
         # Navigation and export buttons
@@ -319,12 +302,12 @@ class VideoSyncWidget(QWidget):
         
         # Topography widget (replaces title)
         self.topo_widget = TopographyWidget(self.electrode_positions, self.theme_colors)
-        self.topo_widget.setMinimumHeight(200)
-        self.topo_widget.setMaximumHeight(300)
-        mosaic_layout.addWidget(self.topo_widget, stretch=1)
+        self.topo_widget.setMinimumHeight(300)
+        self.topo_widget.setMaximumHeight(450)
+        mosaic_layout.addWidget(self.topo_widget, stretch=3)
         
         self.mosaic_timeline = MosaicTimelineWidget(self.theme_colors)
-        mosaic_layout.addWidget(self.mosaic_timeline, stretch=2)
+        mosaic_layout.addWidget(self.mosaic_timeline, stretch=1)
         
         main_splitter.addWidget(mosaic_container)
         
@@ -333,12 +316,47 @@ class VideoSyncWidget(QWidget):
         
         layout.addWidget(main_splitter)
         
+        # Track slider dragging state
+        self._slider_dragging = False
+        
+    def _on_window_length_changed(self, text):
+        """Handle window length selection change."""
+        if "Full" in text:
+            self.video_window_length = float('inf')
+        else:
+            # Parse "±60 sec" -> 60.0
+            try:
+                value = int(text.replace("±", "").replace(" sec", ""))
+                self.video_window_length = float(value)
+            except ValueError:
+                self.video_window_length = 60.0
+        print(f"Video window length set to: ±{self.video_window_length}s")
+        
     def keyPressEvent(self, event: QKeyEvent):
         """Handle keyboard events - ESC to return to label."""
         if event.key() == Qt.Key.Key_Escape:
             self.return_to_label.emit()
+        elif event.key() == Qt.Key.Key_Space:
+            self.toggle_playback()
+        elif event.key() == Qt.Key.Key_Left:
+            self._seek_relative(-1.0)
+        elif event.key() == Qt.Key.Key_Right:
+            self._seek_relative(1.0)
         else:
             super().keyPressEvent(event)
+            
+    def _seek_relative(self, delta_seconds):
+        """Seek video by a relative amount."""
+        if self.cap is None:
+            return
+        current_time = self.current_frame_idx / self.video_fps
+        new_time = max(0, min(current_time + delta_seconds, self.video_duration))
+        new_frame = int(new_time * self.video_fps)
+        self.current_frame_idx = new_frame
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, new_frame)
+        self._display_current_frame()
+        self._update_time_display()
+        self._sync_mosaic_and_topo()
             
     def set_eeg_data(self, df, mosaic_relationships):
         """Set EEG data for mosaic display."""
@@ -365,66 +383,107 @@ class VideoSyncWidget(QWidget):
             self.load_video(file_path)
             
     def load_video(self, path):
-        """Load a video file."""
-        if not MULTIMEDIA_AVAILABLE or self.media_player is None:
-            QMessageBox.warning(self, "Not Available", 
-                "Video playback requires PyQt6 Multimedia.\n"
-                "Please install: pip install PyQt6-Qt6")
-            return
+        """Load a video file using OpenCV."""
+        # Release previous capture if any
+        if self.cap is not None:
+            self.cap.release()
+            
         self.video_path = path
+        self.cap = cv2.VideoCapture(path)
+        
+        if not self.cap.isOpened():
+            QMessageBox.warning(self, "Error", f"Failed to open video:\n{path}")
+            self.video_path = None
+            self.cap = None
+            return
+        
+        # Get video properties
+        self.video_fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+        self.video_frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.video_duration = self.video_frame_count / self.video_fps
+        
+        # Update UI
         self.video_path_label.setText(Path(path).name)
         self.video_path_label.setStyleSheet("color: green;")
-        self.media_player.setSource(QUrl.fromLocalFile(path))
+        
+        # Set slider range (in milliseconds for precision)
+        self.seek_slider.setRange(0, int(self.video_duration * 1000))
+        
+        # Display first frame
+        self.current_frame_idx = 0
+        self._display_current_frame()
+        self._update_time_display()
+        
         print(f"Video loaded: {path}")
+        print(f"  FPS: {self.video_fps:.2f}, Duration: {self.video_duration:.2f}s, Frames: {self.video_frame_count}")
         
-    def toggle_playback(self):
-        """Toggle play/pause."""
-        if self.media_player is None:
+    def _display_current_frame(self):
+        """Read and display the current frame."""
+        if self.cap is None:
             return
-        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            self.media_player.pause()
-            self.play_btn.setText("▶ Play")
-        else:
-            self.media_player.play()
-            self.play_btn.setText("⏸ Pause")
             
-    def stop_playback(self):
-        """Stop playback."""
-        if self.media_player is None:
+        # Seek to current frame
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
+        ret, frame = self.cap.read()
+        
+        if not ret:
             return
-        self.media_player.stop()
-        self.play_btn.setText("▶ Play")
-        
-    def seek_position(self, position):
-        """Seek to a position in the video."""
-        if self.media_player is None:
-            return
-        self.media_player.setPosition(position)
-        
-    def on_position_changed(self, position):
-        """Handle position change."""
-        self.seek_slider.setValue(position)
-        self.update_time_labels(position)
-        
-    def on_duration_changed(self, duration):
-        """Handle duration change."""
-        self.seek_slider.setRange(0, duration)
-        
-    def on_playback_state_changed(self, state):
-        """Handle playback state changes - start/stop sync timer."""
-        if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.sync_timer.start(100)  # Update mosaic every 100ms
-        else:
-            self.sync_timer.stop()
             
-    def sync_mosaic_with_video(self):
-        """Sync mosaic time marker with current video position."""
-        if self.media_player is None:
-            return
-        video_time_ms = self.media_player.position()
-        video_time = video_time_ms / 1000.0
+        # Convert BGR to RGB
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Calculate EEG time from video time
+        # Get label size for scaling
+        label_size = self.video_label.size()
+        target_w = label_size.width() - 10
+        target_h = label_size.height() - 10
+        
+        if target_w > 0 and target_h > 0:
+            # Calculate aspect-preserving size
+            h, w = frame_rgb.shape[:2]
+            scale = min(target_w / w, target_h / h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            
+            if new_w > 0 and new_h > 0:
+                frame_rgb = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        
+        # Convert to QPixmap
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+        q_img = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(q_img)
+        
+        self.video_label.setPixmap(pixmap)
+        
+    def _update_frame(self):
+        """Timer callback: advance and display next frame."""
+        if self.cap is None or not self.is_playing:
+            return
+            
+        self.current_frame_idx += 1
+        
+        # Check bounds
+        if self.current_frame_idx >= self.video_frame_count:
+            self.stop_playback()
+            return
+            
+        self._display_current_frame()
+        self._update_time_display()
+        
+        # Sync mosaic and topography periodically (every 5 frames to reduce overhead)
+        if self.current_frame_idx % 5 == 0:
+            self._sync_mosaic_and_topo()
+            
+        # Update slider if not being dragged
+        if not self._slider_dragging:
+            current_time_ms = int((self.current_frame_idx / self.video_fps) * 1000)
+            self.seek_slider.setValue(current_time_ms)
+            
+    def _sync_mosaic_and_topo(self):
+        """Sync mosaic timeline and topography with current video time."""
+        if self.cap is None:
+            return
+            
+        video_time = self.current_frame_idx / self.video_fps
         eeg_time = video_time - self.time_offset
         
         # Update mosaic timeline
@@ -432,36 +491,100 @@ class VideoSyncWidget(QWidget):
         
         # Check if epoch changed and update topography
         current_epoch = int(eeg_time / self.epoch_length) if self.epoch_length > 0 else 0
-        if current_epoch != self.last_displayed_epoch:
+        if current_epoch != self.last_displayed_epoch and current_epoch >= 0:
             self.update_topography_for_epoch(current_epoch, eeg_time)
             self.last_displayed_epoch = current_epoch
+            
+    def _update_time_display(self):
+        """Update the time label and epoch label."""
+        if self.cap is None:
+            return
+            
+        current_time = self.current_frame_idx / self.video_fps
         
-    def update_time_labels(self, position_ms):
-        """Update time display labels."""
-        duration = self.media_player.duration()
-        
-        pos_str = self.format_time(position_ms)
-        dur_str = self.format_time(duration)
+        pos_str = self._format_time(current_time)
+        dur_str = self._format_time(self.video_duration)
         self.time_label.setText(f"{pos_str} / {dur_str}")
         
         # Calculate EEG time
-        video_time = position_ms / 1000.0
-        eeg_time = video_time - self.time_offset
+        eeg_time = current_time - self.time_offset
         epoch = int(eeg_time / self.epoch_length) if self.epoch_length > 0 else 0
         
-        self.epoch_label.setText(f"Epoch: {epoch} | EEG: {eeg_time:.2f}s | Video: {video_time:.2f}s")
+        self.epoch_label.setText(f"Epoch: {epoch} | EEG: {eeg_time:.2f}s | Video: {current_time:.2f}s")
         
-    def format_time(self, ms):
-        """Format milliseconds to MM:SS."""
-        seconds = ms // 1000
-        minutes = seconds // 60
-        seconds = seconds % 60
-        return f"{minutes:02d}:{seconds:02d}"
+    def _format_time(self, seconds):
+        """Format seconds to MM:SS."""
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes:02d}:{secs:02d}"
+        
+    def toggle_playback(self):
+        """Toggle play/pause."""
+        if self.cap is None:
+            return
+            
+        if self.is_playing:
+            self.pause_playback()
+        else:
+            self.start_playback()
+            
+    def start_playback(self):
+        """Start video playback."""
+        if self.cap is None:
+            return
+            
+        self.is_playing = True
+        self.play_btn.setText("⏸ Pause")
+        
+        # Calculate timer interval from FPS
+        interval_ms = int(1000 / self.video_fps)
+        self.playback_timer.start(max(1, interval_ms))
+        
+    def pause_playback(self):
+        """Pause video playback."""
+        self.is_playing = False
+        self.play_btn.setText("▶ Play")
+        self.playback_timer.stop()
+        
+    def stop_playback(self):
+        """Stop playback and reset to start."""
+        self.pause_playback()
+        self.current_frame_idx = 0
+        if self.cap is not None:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self._display_current_frame()
+        self._update_time_display()
+        self.seek_slider.setValue(0)
+        
+    def seek_position(self, position_ms):
+        """Seek to a position (in milliseconds)."""
+        if self.cap is None:
+            return
+            
+        target_time = position_ms / 1000.0
+        target_frame = int(target_time * self.video_fps)
+        target_frame = max(0, min(target_frame, self.video_frame_count - 1))
+        
+        self.current_frame_idx = target_frame
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+        self._display_current_frame()
+        self._update_time_display()
+        self._sync_mosaic_and_topo()
+        
+    def _on_slider_pressed(self):
+        """Handle slider press - pause updates while dragging."""
+        self._slider_dragging = True
+        
+    def _on_slider_released(self):
+        """Handle slider release - resume updates."""
+        self._slider_dragging = False
+        self.seek_position(self.seek_slider.value())
         
     def on_offset_changed(self, value):
         """Handle time offset change."""
         self.time_offset = value
-        self.seek_to_epoch(self.current_epoch)
+        self._sync_mosaic_and_topo()
+        self._update_time_display()
         
     def set_time_offset(self, seconds):
         """Set the EEG-to-video time offset."""
@@ -492,13 +615,17 @@ class VideoSyncWidget(QWidget):
         self.update_topography_for_epoch(epoch_idx, eeg_time)
         self.last_displayed_epoch = epoch_idx
         
-        # Seek video (only if multimedia is available)
-        if self.media_player is not None:
-            if video_time >= 0:
-                video_time_ms = int(video_time * 1000)
-                self.media_player.setPosition(video_time_ms)
-            else:
-                self.media_player.setPosition(0)
+        # Seek video
+        if self.cap is not None and video_time >= 0:
+            target_frame = int(video_time * self.video_fps)
+            target_frame = max(0, min(target_frame, self.video_frame_count - 1))
+            self.current_frame_idx = target_frame
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            self._display_current_frame()
+            self._update_time_display()
+            
+            # Update slider
+            self.seek_slider.setValue(int(video_time * 1000))
             
         print(f"Seeking to epoch {epoch_idx}: EEG={eeg_time:.2f}s, Video={video_time:.2f}s")
         
@@ -546,3 +673,10 @@ class VideoSyncWidget(QWidget):
             parent=self
         )
         dialog.exec()
+        
+    def closeEvent(self, event):
+        """Clean up on close."""
+        self.playback_timer.stop()
+        if self.cap is not None:
+            self.cap.release()
+        super().closeEvent(event)

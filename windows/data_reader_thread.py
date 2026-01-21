@@ -16,6 +16,11 @@ current_dir = Path(__file__).parent.parent
 utils_dir = current_dir / "utils"
 sys.path.insert(0, str(utils_dir))
 
+
+# Initialize modules to None
+read_intan = None
+cache_manager = None
+
 try:
     import read_intan
     from cache_manager import cache_manager
@@ -63,21 +68,26 @@ class DataReaderThread(QThread):
             
             # Check if we should use cache (only for RHD files for now)
             if self.use_cache and self.file_type == 'rhd':
-                is_cached, cache_key = cache_manager.is_cached(self.path_or_files)
-                if is_cached:
-                    self.progress_update.emit("Loading from cache...")
-                    print(f"Found cached data for directory. Loading from cache...")
-                    results = cache_manager.load_from_cache(self.path_or_files)
-                    print(f"Successfully loaded {len(results)} files from cache!")
-                    print("=" * 50)
-                    self.data_loaded.emit(results)
-                    return
+                if cache_manager is None:
+                    print("Warning: cache_manager not available, skipping cache check.")
+                else:
+                    is_cached, cache_key = cache_manager.is_cached(self.path_or_files)
+                    if is_cached:
+                        self.progress_update.emit("Loading from cache...")
+                        print(f"Found cached data for directory. Loading from cache...")
+                        results = cache_manager.load_from_cache(self.path_or_files)
+                        print(f"Successfully loaded {len(results)} files from cache!")
+                        print("=" * 50)
+                        self.data_loaded.emit(results)
+                        return
             
             # Read from original files based on file type
             self.progress_update.emit(f"Reading {file_type_upper} files...")
             
             if self.file_type == 'rhd':
                 # Use the read_intan module to read RHD files
+                if read_intan is None:
+                    raise ImportError("read_intan module not available. Please check dependencies (tqdm).")
                 results = read_intan.read_rhd_directory(self.path_or_files)
                 file_description = "RHD files"
             elif self.file_type == 'csv':
@@ -95,10 +105,11 @@ class DataReaderThread(QThread):
                 
                 # Save to cache if requested (only for RHD files for now)
                 if self.save_cache and self.file_type == 'rhd':
-                    self.progress_update.emit("Saving to cache...")
-                    print("Saving data to cache for faster future access...")
-                    cache_manager.save_to_cache(self.path_or_files, results)
-                    print("Cache saved successfully!")
+                    if cache_manager is not None:
+                        self.progress_update.emit("Saving to cache...")
+                        print("Saving data to cache for faster future access...")
+                        cache_manager.save_to_cache(self.path_or_files, results)
+                        print("Cache saved successfully!")
                 
                 print("=" * 50)
                 self.data_loaded.emit(results)

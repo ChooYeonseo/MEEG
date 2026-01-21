@@ -68,6 +68,7 @@ a = Analysis(
         'sklearn',
         'json',
         'hashlib',
+        'requests',  # For auto-update
     ],
     hookspath=[],
     hooksconfig={},

@@ -7,7 +7,8 @@ used throughout the application.
 
 # Application metadata
 APP_NAME = "EEG Analysis Tool"
-APP_VERSION = "1.0"
+APP_VERSION = "1.0.0"
+GITHUB_REPO = "ChooYeonseo/MEEG"
 ORGANIZATION_NAME = "EEG Research"
 ORGANIZATION_DOMAIN = "eeg-research.org"
 

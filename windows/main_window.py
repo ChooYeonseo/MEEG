@@ -56,6 +56,22 @@ class EEGMainWindow(QMainWindow):
         self.init_ui()
         self.setup_styles()
         
+        # Check for updates in background (silent on startup)
+        self._setup_auto_updater()
+    
+    def _setup_auto_updater(self):
+        """Initialize auto-update checking on startup."""
+        try:
+            from utils.auto_updater import check_for_updates_on_startup
+            # Keep reference to prevent garbage collection
+            self._updater = check_for_updates_on_startup(parent=self, silent=True)
+        except ImportError:
+            # Auto-updater not available (requests not installed)
+            pass
+        except Exception as e:
+            print(f"Auto-update check failed: {e}")
+        
+        
     def init_ui(self):
         """Initialize the user interface."""
         self.setWindowTitle("MEEG")
