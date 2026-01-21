@@ -220,8 +220,8 @@ class AutoUpdater(QObject):
             self._apply_update_source(version)
     
     def _apply_update_frozen(self, version: str, download_url: str):
-        """Apply update for frozen exe by downloading new version."""
-        print(f"[Update] Frozen mode - downloading new exe for v{version}...")
+        """Apply update for frozen exe by downloading and launching updater."""
+        print(f"[Update] Frozen mode - downloading update for v{version}...")
         
         if not download_url:
             QMessageBox.warning(
@@ -274,20 +274,48 @@ class AutoUpdater(QObject):
             
             print(f"\n[Update] Download complete: {download_path}")
             
-            # Show success and open file location
-            QMessageBox.information(
-                None,
-                "Download Complete",
-                f"New version downloaded to:\n{download_path}\n\n"
-                "Please close this application and:\n"
-                "1. Extract the new version\n"
-                "2. Replace the old files with new ones\n"
-                "3. Run the new MEEG.exe"
-            )
+            # Check if MEEG_updater.exe exists
+            updater_exe = app_dir / "MEEG_updater.exe"
             
-            # Open folder containing the download
-            if sys.platform == "win32":
-                subprocess.run(["explorer", "/select,", str(download_path)])
+            if updater_exe.exists():
+                # Launch updater and exit
+                reply = QMessageBox.question(
+                    None,
+                    "Update Ready",
+                    f"Update v{version} downloaded successfully!\n\n"
+                    "Click 'Yes' to install now (the app will restart).\n"
+                    "Click 'No' to install later.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    print("[Update] Launching MEEG_updater.exe...")
+                    # Launch updater with arguments
+                    subprocess.Popen([
+                        str(updater_exe),
+                        str(download_path),
+                        str(app_dir),
+                        "--main-pid", str(os.getpid())
+                    ])
+                    # Exit the main application
+                    print("[Update] Exiting for update...")
+                    sys.exit(0)
+            else:
+                # Fallback: manual update
+                QMessageBox.information(
+                    None,
+                    "Download Complete",
+                    f"New version downloaded to:\n{download_path}\n\n"
+                    "Please close this application and:\n"
+                    "1. Extract the zip file\n"
+                    "2. Replace the old files with new ones\n"
+                    "3. Run the new MEEG.exe\n\n"
+                    "(MEEG_updater.exe not found for automatic update)"
+                )
+                
+                # Open folder containing the download
+                if sys.platform == "win32":
+                    subprocess.run(["explorer", "/select,", str(download_path)])
                 
         except Exception as e:
             print(f"[Update] Error: {e}")
