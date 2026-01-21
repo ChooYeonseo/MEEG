@@ -1411,12 +1411,34 @@ class EpilepsyLabelWindow(QWidget):
             # 1. Ask for Data ID (e.g. M25001)
             data_id, ok = QInputDialog.getText(
                 self, "File to DB", 
-                "Data ID (ex. M25001):"
+                "Data ID (ex. M1AP01):"
             )
             if not ok or not data_id:
                 return
 
-            # 2. Ask for float approximation digits (precision)
+            # 2. Check if ExtraData exists (2-digit portion at position 4-5)
+            # and show memo dialog if it does
+            memo_text = ""
+            if len(data_id) >= 6:
+                # ExtraData exists, show memo dialog
+                memo_text, ok = QInputDialog.getMultiLineText(
+                    self, "Add Memo",
+                    "Enter notes/memo for this recording:\n(ExtraData detected)",
+                    ""
+                )
+                if not ok:
+                    return
+            
+            # 3. Ask for the recording date
+            date_str, ok = QInputDialog.getText(
+                self, "Recording Date",
+                "Enter recording date (ex. 2026-01-20):",
+                text=""
+            )
+            if not ok:
+                return
+
+            # 4. Ask for float approximation digits (precision)
             precision, ok = QInputDialog.getInt(
                 self, "File to DB",
                 "Decimal Precision (digits under .):",
@@ -1425,7 +1447,7 @@ class EpilepsyLabelWindow(QWidget):
             if not ok:
                 return
 
-            # 3. Ask for output directory
+            # 5. Ask for output directory
             directory = QFileDialog.getExistingDirectory(
                 self, "Select Output Directory for CSV Files"
             )
@@ -1501,12 +1523,39 @@ class EpilepsyLabelWindow(QWidget):
                 
             except Exception as e:
                 print(f"Error saving label file: {e}")
+            
+            # Save Metadata JSON
+            try:
+                import json
+                from .create_meta import create_meta
+                
+                # Get activated channel names (sorted alphabetically)
+                activated_channels = list(self.df.columns)
+                
+                # Create metadata dictionary
+                meta_data = create_meta(
+                    name=data_id,
+                    memo=memo_text,
+                    date=date_str,
+                    activated_channels=activated_channels
+                )
+                
+                # Save as JSON
+                meta_file = save_dir / f"{data_id}_metadata.json"
+                with open(meta_file, 'w', encoding='utf-8') as f:
+                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
+                
+                saved_count += 1
+                print(f"Metadata saved to: {meta_file}")
+                
+            except Exception as e:
+                print(f"Error saving metadata file: {e}")
                 
             if saved_count > 0:
                 self.show_message_box(QMessageBox.Icon.Information, 
                                     "Success", 
                                     f"Saved {saved_count} files to:\n{directory}\n\n"
-                                    f"Covered {n_epochs} epochs + Labels.")
+                                    f"Covered {n_epochs} epochs + Labels + Metadata.")
                 
                 # Cache Deletion Option
                 if self.cache_key:

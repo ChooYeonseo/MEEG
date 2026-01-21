@@ -1,6 +1,7 @@
-name: eeg
+name: meeg
 channels:
   - conda-forge
+  - defaults
 dependencies:
   # core
   - python=3.12
@@ -15,12 +16,16 @@ dependencies:
   - matplotlib>=3.8
   - openpyxl
 
-  # optional GUI/Qt (pick ONE family; here we choose PyQt6)
+  # GUI/Qt
   - pyqt>=6
 
-  # if you need progress bars, etc. you can add:
+  # video processing
+  - opencv
+
+  # utilities
   - tqdm
-  #
-  # keep pip section only for things not available on conda-forge
-  # pip:
-  #   - some-package-only-on-pip
+
+  # pip dependencies (not available on conda-forge or need specific versions)
+  - pip:
+    - requests       # For GitHub API (auto-update)
+    - pyinstaller    # For building exe

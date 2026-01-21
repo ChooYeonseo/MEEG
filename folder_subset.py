@@ -93,6 +93,6 @@ if __name__ == "__main__":
     main()
 
 '''
-python3 folder_subset.py "/Volumes/CHOO'S SSD/LINK/EEG A_WT+pilo B_KO+pilo/250828 overnight EEG A_WT+pilo B_KO+pilo_250828_191638"
+python3 folder_subset.py "E:\LINK\1. 박진봉 교수님 데이터\250828 overnight EEG A_WT+pilo B_KO+pilo_250828_191638"
 
 '''

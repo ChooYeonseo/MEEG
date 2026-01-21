@@ -157,6 +157,10 @@ class TopographyWidget(QWidget):
         # Cache for boundary electrodes (computed once)
         self._cached_boundary = None
         
+        # Cache for computed power values (epoch_idx, freq_band) -> power_values
+        self._power_cache = {}
+        self._power_cache_max_size = 100  # Maximum cache entries
+        
         # Electrode coordinates dictionary
         self.electrode_coords = {}
         self._prepare_electrode_coords()
@@ -549,8 +553,22 @@ class TopographyWidget(QWidget):
             self.setup_topography_plot()
             return
         
-        # Compute power values
-        power_values = self.compute_psd_power(self.epoch_data, self.current_freq_band)
+        # Create cache key from epoch index and frequency band
+        cache_key = (self.current_epoch, self.current_freq_band)
+        
+        # Check cache first
+        if cache_key in self._power_cache:
+            power_values = self._power_cache[cache_key]
+        else:
+            # Compute power values
+            power_values = self.compute_psd_power(self.epoch_data, self.current_freq_band)
+            
+            # Store in cache (with size limit)
+            if len(self._power_cache) >= self._power_cache_max_size:
+                # Remove oldest entry (first key)
+                oldest_key = next(iter(self._power_cache))
+                del self._power_cache[oldest_key]
+            self._power_cache[cache_key] = power_values
         
         if not power_values:
             self.setup_topography_plot()
