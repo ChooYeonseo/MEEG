@@ -62,10 +62,15 @@ else:
     print("Note: ffmpeg folder not found. Video segment extraction will use fallback mode.")
     print("      To bundle ffmpeg, create 'ffmpeg/' folder with ffmpeg.exe and ffprobe.exe")
 
+from PyInstaller.utils.hooks import collect_dynamic_libs
+
+# Get OpenCV binaries (specifically ffmpeg dll)
+cv2_binaries = collect_dynamic_libs('cv2')
+
 a = Analysis(
     ['meeg.py'],
     pathex=[str(project_root)],
-    binaries=ffmpeg_binaries,
+    binaries=ffmpeg_binaries + cv2_binaries,
     datas=added_files,
     hiddenimports=[
         'PyQt6',
