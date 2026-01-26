@@ -524,6 +524,9 @@ class EpilepsyLabelWindow(QWidget):
         # === CREATE TAB WIDGET ===
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabPosition(QTabWidget.TabPosition.North)
+        # Apply theme background
+        self.tab_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.tab_widget.setStyleSheet(f"background-color: {self.theme_colors['bg_secondary']}; color: {self.theme_colors['fg_primary']};")
         
         # === LABEL TAB (original content) ===
         label_tab = QWidget()
@@ -627,6 +630,10 @@ class EpilepsyLabelWindow(QWidget):
     def create_control_panel(self):
         """Create the control panel widget with 3 sub-panels."""
         panel = QWidget()
+        # Apply theme background
+        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        panel.setStyleSheet(f"background-color: {self.theme_colors['bg_secondary']}; color: {self.theme_colors['fg_primary']};")
+
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(10)

@@ -203,7 +203,11 @@ class VideoSyncWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
-        
+
+        # Apply theme colors
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"background-color: {self.theme_colors['bg_secondary']}; color: {self.theme_colors['fg_primary']};")
+
         # Main splitter: Video (left) | Mosaic (right)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         

@@ -79,17 +79,19 @@ def extract_update(zip_path: Path, target_dir: Path, backup_dir: Path):
         preserve = {
             'cache',           # User's cached projects
             'electrode_map',   # User's electrode configurations
-            'MEEG_update',     # Update downloads folder
+            'meeg_update',     # Update downloads folder
             '_update_temp',    # Temporary extraction folder
             '_backup',         # Backup folder
-            'MEEG_updater.exe' # Updater itself (in case new version has issues)
+            'meeg_updater.exe', # Updater itself
+            'config.py'        # User config (optional, but good to preserve if it exists)
         }
         
         # Copy new files, backing up old ones
         for item in source_dir.iterdir():
             dest_item = target_dir / item.name
             
-            if item.name in preserve:
+            # Case-insensitive check for preservation
+            if item.name.lower() in preserve:
                 print(f"[Updater] Preserving: {item.name}")
                 continue
             
@@ -101,6 +103,14 @@ def extract_update(zip_path: Path, target_dir: Path, backup_dir: Path):
                     if backup_item.exists():
                         shutil.rmtree(backup_item)
                     shutil.move(str(dest_item), str(backup_item))
+                    
+                    # RESCUE MISSION: If we just moved a folder that might contain user data (like _internal)
+                    # We need to check if we can salvage 'cache' or 'electrode_map' from it
+                    for safe_item in ['cache', 'electrode_map', 'config.py']:
+                        safe_path = backup_item / safe_item
+                        if safe_path.exists():
+                            print(f"[Updater] Rescuing {safe_item} from {item.name} backup...")
+                            # We will restore this AFTER copying the new version
                 else:
                     shutil.move(str(dest_item), str(backup_item))
             
@@ -108,6 +118,26 @@ def extract_update(zip_path: Path, target_dir: Path, backup_dir: Path):
             print(f"[Updater] Installing: {item.name}")
             if item.is_dir():
                 shutil.copytree(str(item), str(dest_item))
+                
+                # RESTORE MISSION: Check if we rescued anything from the backup of this folder
+                if dest_item.exists():
+                    backup_item = backup_dir / item.name
+                    if backup_item.exists():
+                        for safe_item in ['cache', 'electrode_map', 'config.py']:
+                            rescued_src = backup_item / safe_item
+                            target_dst = dest_item / safe_item
+                            
+                            if rescued_src.exists():
+                                print(f"[Updater] Restoring rescued {safe_item} to {dest_item.name}...")
+                                # If the update came with a default empty cache/etc, remove it first
+                                if target_dst.exists():
+                                    if target_dst.is_dir():
+                                        shutil.rmtree(target_dst)
+                                    else:
+                                        target_dst.unlink()
+                                
+                                # Move rescued item back
+                                shutil.move(str(rescued_src), str(target_dst))
             else:
                 shutil.copy2(str(item), str(dest_item))
         

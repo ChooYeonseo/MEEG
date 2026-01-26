@@ -183,6 +183,10 @@ class TopographyWidget(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
         
+        # Apply theme colors to container
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"background-color: {self.theme_colors['bg_secondary']}; color: {self.theme_colors['fg_primary']};")
+        
         # Title
         title_label = QLabel("EEG Power Topography")
         title_font = QFont()

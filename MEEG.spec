@@ -40,6 +40,9 @@ added_files = [
     # RHD loader
     ('load-rhd-notebook-python', 'load-rhd-notebook-python'),
     
+    # Images (Mouse head, etc.)
+    ('img', 'img'),
+    
     # Config file (for version info)
     ('config.py', '.'),
 ]
