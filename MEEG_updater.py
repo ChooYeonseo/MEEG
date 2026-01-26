@@ -1,19 +1,3 @@
-"""
-MEEG Updater - Standalone update script.
-
-This script is bundled as MEEG_updater.exe and is launched by the main app
-to apply updates. It:
-1. Waits for the main MEEG.exe to close
-2. Extracts the downloaded update
-3. Replaces old files with new ones
-4. Launches the updated MEEG.exe
-5. Cleans up and exits
-
-Usage:
-    MEEG_updater.exe <zip_path> <app_dir> [--main-pid <pid>]
-"""
-
-import os
 import sys
 import time
 import shutil
@@ -23,223 +7,169 @@ import argparse
 from pathlib import Path
 
 
+# ------------------------------------------------------------
+# Utilities
+# ------------------------------------------------------------
+
 def wait_for_process_exit(pid, timeout=30):
-    """Wait for a process to exit (Windows)."""
     if pid is None:
         return True
-    
+
     try:
         import ctypes
         kernel32 = ctypes.windll.kernel32
         SYNCHRONIZE = 0x00100000
-        
-        # Open the process
         handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
         if handle:
-            # Wait for process to exit
-            WAIT_OBJECT_0 = 0x00000000
-            result = kernel32.WaitForSingleObject(handle, timeout * 1000)
+            kernel32.WaitForSingleObject(handle, timeout * 1000)
             kernel32.CloseHandle(handle)
-            return result == WAIT_OBJECT_0
-    except:
+    except Exception:
         pass
-    
-    # Fallback: just wait a bit
-    time.sleep(3)
+
+    time.sleep(2)
     return True
 
 
-def extract_update(zip_path: Path, target_dir: Path, backup_dir: Path):
-    """Extract update zip and replace files."""
-    print(f"[Updater] Extracting {zip_path} to {target_dir}...")
-    
-    # Create backup directory
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Create a temporary extraction directory
-    temp_extract = target_dir / "_update_temp"
-    if temp_extract.exists():
-        shutil.rmtree(temp_extract)
-    temp_extract.mkdir()
-    
-    try:
-        # Extract the zip
-        with zipfile.ZipFile(zip_path, 'r') as zf:
-            zf.extractall(temp_extract)
-        
-        # Find the root directory in the extracted content
-        # GitHub zips usually have a root folder like "MEEG-main/"
-        extracted_items = list(temp_extract.iterdir())
-        if len(extracted_items) == 1 and extracted_items[0].is_dir():
-            source_dir = extracted_items[0]
+def replace_with_move(src: Path, dst: Path):
+    """
+    HARD replacement:
+    - delete dst
+    - MOVE src → dst
+    """
+    if not src.exists():
+        return False
+
+    if dst.exists():
+        if dst.is_dir():
+            shutil.rmtree(dst)
         else:
-            source_dir = temp_extract
-        
-        # Files/folders to preserve (don't delete or overwrite - user data!)
+            dst.unlink()
+
+    shutil.move(str(src), str(dst))
+    return True
+
+
+# ------------------------------------------------------------
+# Update logic
+# ------------------------------------------------------------
+
+def extract_update(zip_path: Path, app_dir: Path) -> bool:
+    backup_dir = app_dir / "_backup"
+    temp_dir = app_dir / "_update_temp"
+
+    try:
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        backup_dir.mkdir()
+        temp_dir.mkdir()
+
+        # Extract update
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(temp_dir)
+
+        extracted = list(temp_dir.iterdir())
+        source_dir = extracted[0] if len(extracted) == 1 and extracted[0].is_dir() else temp_dir
+
         preserve = {
-            'cache',           # User's cached projects
-            'electrode_map',   # User's electrode configurations
-            'meeg_update',     # Update downloads folder
-            '_update_temp',    # Temporary extraction folder
-            '_backup',         # Backup folder
-            'meeg_updater.exe', # Updater itself
-            'config.py'        # User config (optional, but good to preserve if it exists)
+            "_backup",
+            "_update_temp",
+            "meeg_updater.exe",
+            "meeg_update",
         }
-        
-        # Copy new files, backing up old ones
+
+        # ----------------------------
+        # Phase 1: Backup old version
+        # ----------------------------
         for item in source_dir.iterdir():
-            dest_item = target_dir / item.name
-            
-            # Case-insensitive check for preservation
+            dst = app_dir / item.name
             if item.name.lower() in preserve:
-                print(f"[Updater] Preserving: {item.name}")
                 continue
-            
-            # Backup existing item
-            if dest_item.exists():
-                backup_item = backup_dir / item.name
-                print(f"[Updater] Backing up: {item.name}")
-                if dest_item.is_dir():
-                    if backup_item.exists():
-                        shutil.rmtree(backup_item)
-                    shutil.move(str(dest_item), str(backup_item))
-                    
-                    # RESCUE MISSION: If we just moved a folder that might contain user data (like _internal)
-                    # We need to check if we can salvage 'cache' or 'electrode_map' from it
-                    for safe_item in ['cache', 'electrode_map', 'config.py']:
-                        safe_path = backup_item / safe_item
-                        if safe_path.exists():
-                            print(f"[Updater] Rescuing {safe_item} from {item.name} backup...")
-                            # We will restore this AFTER copying the new version
-                else:
-                    shutil.move(str(dest_item), str(backup_item))
-            
-            # Copy new item
-            print(f"[Updater] Installing: {item.name}")
+            if dst.exists():
+                shutil.move(str(dst), str(backup_dir / item.name))
+
+        # ----------------------------
+        # Phase 2: Install new version
+        # ----------------------------
+        for item in source_dir.iterdir():
+            dst = app_dir / item.name
+            if item.name.lower() in preserve:
+                continue
             if item.is_dir():
-                shutil.copytree(str(item), str(dest_item))
-                
-                # RESTORE MISSION: Check if we rescued anything from the backup of this folder
-                if dest_item.exists():
-                    backup_item = backup_dir / item.name
-                    if backup_item.exists():
-                        for safe_item in ['cache', 'electrode_map', 'config.py']:
-                            rescued_src = backup_item / safe_item
-                            target_dst = dest_item / safe_item
-                            
-                            if rescued_src.exists():
-                                print(f"[Updater] Restoring rescued {safe_item} to {dest_item.name}...")
-                                # If the update came with a default empty cache/etc, remove it first
-                                if target_dst.exists():
-                                    if target_dst.is_dir():
-                                        shutil.rmtree(target_dst)
-                                    else:
-                                        target_dst.unlink()
-                                
-                                # Move rescued item back
-                                shutil.move(str(rescued_src), str(target_dst))
+                shutil.copytree(item, dst)
             else:
-                shutil.copy2(str(item), str(dest_item))
-        
-        print("[Updater] Update applied successfully!")
+                shutil.copy2(item, dst)
+
+        # ----------------------------
+        # Phase 3: Restore user data (MOVE)
+        # ----------------------------
+        replace_with_move(backup_dir / "cache", app_dir / "cache")
+        replace_with_move(backup_dir / "electrode_map", app_dir / "electrode_map")
+        replace_with_move(backup_dir / "config.py", app_dir / "config.py")
+
+        # ----------------------------
+        # Phase 4: RESTORE _internal DATA (CRITICAL FIX)
+        # ----------------------------
+        internal_backup = backup_dir / "_internal"
+        internal_target = app_dir / "_internal"
+
+        data_moved = False
+
+        if internal_backup.exists() and internal_target.exists():
+            if replace_with_move(internal_backup / "cache",
+                                 internal_target / "cache"):
+                data_moved = True
+
+            if replace_with_move(internal_backup / "electrode_map",
+                                 internal_target / "electrode_map"):
+                data_moved = True
+
+        if data_moved:
+            print("[Updater] data moved")
+
+        # Cleanup
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        shutil.rmtree(backup_dir, ignore_errors=True)
+
         return True
-        
+
     except Exception as e:
         print(f"[Updater] ERROR: {e}")
         return False
-    finally:
-        # Clean up temp directory
-        if temp_extract.exists():
-            try:
-                shutil.rmtree(temp_extract)
-            except:
-                pass
 
+
+# ------------------------------------------------------------
+# Entry point
+# ------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='MEEG Updater')
-    parser.add_argument('zip_path', help='Path to the downloaded update zip')
-    parser.add_argument('app_dir', help='Path to the MEEG application directory')
-    parser.add_argument('--main-pid', type=int, help='PID of the main MEEG process to wait for')
-    
+    parser = argparse.ArgumentParser(description="MEEG Updater")
+    parser.add_argument("zip_path")
+    parser.add_argument("app_dir")
+    parser.add_argument("--main-pid", type=int)
     args = parser.parse_args()
-    
+
     zip_path = Path(args.zip_path)
     app_dir = Path(args.app_dir)
-    backup_dir = app_dir / "_backup"
-    
-    print("=" * 50)
-    print("MEEG Updater")
-    print("=" * 50)
-    print(f"Update file: {zip_path}")
-    print(f"Application: {app_dir}")
-    print()
-    
-    # Validate inputs
-    if not zip_path.exists():
-        print(f"[Updater] ERROR: Update file not found: {zip_path}")
+
+    if not zip_path.exists() or not app_dir.exists():
+        print("[Updater] Invalid path")
         input("Press Enter to exit...")
         return 1
-    
-    if not app_dir.exists():
-        print(f"[Updater] ERROR: Application directory not found: {app_dir}")
-        input("Press Enter to exit...")
-        return 1
-    
-    # Wait for main process to exit
+
     if args.main_pid:
-        print(f"[Updater] Waiting for MEEG.exe (PID {args.main_pid}) to close...")
-        if not wait_for_process_exit(args.main_pid):
-            print("[Updater] Warning: Main process may still be running")
-        else:
-            print("[Updater] Main process closed.")
-    else:
-        # Just wait a moment for cleanup
-        print("[Updater] Waiting for cleanup...")
-        time.sleep(2)
-    
-    # Apply the update
-    if extract_update(zip_path, app_dir, backup_dir):
-        # Clean up the downloaded zip
-        try:
-            update_dir = app_dir / "MEEG_update"
-            if update_dir.exists():
-                shutil.rmtree(update_dir)
-        except:
-            pass
-        
-        # Launch the updated application
-        meeg_exe = app_dir / "MEEG.exe"
-        if meeg_exe.exists():
-            print(f"[Updater] Launching updated MEEG...")
-            subprocess.Popen([str(meeg_exe)], cwd=str(app_dir))
-        else:
-            print(f"[Updater] Warning: MEEG.exe not found at {meeg_exe}")
-            print("[Updater] Please launch manually.")
-            input("Press Enter to exit...")
-        
-        print("[Updater] Update complete!")
+        wait_for_process_exit(args.main_pid)
+
+    if extract_update(zip_path, app_dir):
+        exe = app_dir / "MEEG.exe"
+        if exe.exists():
+            subprocess.Popen([str(exe)], cwd=str(app_dir))
+        print("[Updater] Update complete")
         return 0
-    else:
-        print("[Updater] Update failed! Restoring backup...")
-        # Restore from backup if update failed
-        for item in backup_dir.iterdir():
-            dest_item = app_dir / item.name
-            if item.is_dir():
-                if dest_item.exists():
-                    shutil.rmtree(dest_item)
-                shutil.copytree(str(item), str(dest_item))
-            else:
-                shutil.copy2(str(item), str(dest_item))
-        
-        input("Press Enter to exit...")
-        return 1
+
+    print("[Updater] Update failed")
+    input("Press Enter to exit...")
+    return 1
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except Exception as e:
-        print(f"[Updater] Fatal error: {e}")
-        input("Press Enter to exit...")
-        sys.exit(1)
+    sys.exit(main())
