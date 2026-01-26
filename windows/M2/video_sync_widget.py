@@ -11,11 +11,14 @@ Uses OpenCV for reliable video playback across all systems.
 import cv2
 import numpy as np
 import pandas as pd
+import subprocess
+import tempfile
+import shutil
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QGroupBox, QFormLayout, QSlider,
                              QDoubleSpinBox, QFileDialog, QSizePolicy, QSplitter,
-                             QProgressDialog, QMessageBox, QComboBox)
+                             QProgressDialog, QMessageBox, QComboBox, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QKeyEvent, QImage, QPixmap
 
@@ -171,6 +174,14 @@ class VideoSyncWidget(QWidget):
         
         # Window length for video display (±N seconds around current time)
         self.video_window_length = 60.0  # Default ±60 seconds
+        
+        # Large video handling - extract segment instead of loading full video
+        # CRITICAL: cv2.VideoCapture can crash on very large files (>500MB) when it tries
+        # to index the file. We MUST use ffmpeg segment extraction for large files.
+        self.original_video_path = None  # Store original path for large videos
+        self.temp_segment_path = None  # Temporary extracted segment
+        self.segment_start_time = 0.0  # Start time of extracted segment in original video
+        self.large_video_threshold = 500 * 1024 * 1024  # 500MB threshold - cv2 struggles with large files
         
         # EEG data for mosaic display
         self.df = pd.DataFrame()
@@ -382,17 +393,77 @@ class VideoSyncWidget(QWidget):
         if file_path:
             self.load_video(file_path)
             
-    def load_video(self, path):
-        """Load a video file using OpenCV."""
+    def load_video(self, path, center_time=None):
+        """Load a video file using OpenCV.
+        
+        For large files (>1GB), extracts only a segment around center_time.
+        
+        Parameters:
+        -----------
+        path : str
+            Path to the video file
+        center_time : float, optional
+            Center time in seconds for segment extraction (for large files).
+            If None, uses current epoch time.
+        """
         # Release previous capture if any
         if self.cap is not None:
             self.cap.release()
+        
+        # Clean up previous temp segment if exists
+        self._cleanup_temp_segment()
+        
+        # Check file size
+        file_size = Path(path).stat().st_size
+        is_large_file = file_size > self.large_video_threshold
+        
+        if is_large_file:
+            print(f"Large video detected ({file_size / (1024**3):.2f} GB). Using segment extraction...")
+            self.original_video_path = path
             
-        self.video_path = path
-        self.cap = cv2.VideoCapture(path)
+            # Calculate center time based on current epoch if not provided
+            if center_time is None:
+                center_time = self.current_epoch * self.epoch_length + self.time_offset
+            
+            # Try ffmpeg-based segment extraction DIRECTLY (don't check duration first - faster!)
+            # ffmpeg can seek without knowing duration
+            segment_duration = self.video_window_length * 2  # ±window_length (120s default)
+            segment_start = max(0, center_time - self.video_window_length)
+            
+            print(f"  Extracting segment starting at {segment_start:.2f}s, duration {segment_duration:.2f}s")
+            
+            # Show progress
+            progress = QProgressDialog("Extracting video segment...", "Cancel", 0, 0, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+            QApplication.processEvents()
+            
+            # Extract segment using ffmpeg (fast seeking, no duration check needed)
+            self.temp_segment_path = self._extract_video_segment(path, segment_start, segment_duration)
+            progress.close()
+            
+            if self.temp_segment_path is not None:
+                self.segment_start_time = segment_start
+                self.video_path = self.temp_segment_path
+                self._original_video_duration = None  # Unknown, but not needed
+                self._use_streaming_mode = False
+                print(f"  Segment extracted successfully!")
+            else:
+                # ffmpeg failed, try streaming mode
+                print("FFmpeg extraction failed, falling back to streaming mode...")
+                self._setup_streaming_mode(path, center_time)
+        else:
+            self.original_video_path = None
+            self.segment_start_time = 0.0
+            self.video_path = path
+            self._original_video_duration = None
+            self._use_streaming_mode = False
+        
+        self.cap = cv2.VideoCapture(self.video_path)
         
         if not self.cap.isOpened():
-            QMessageBox.warning(self, "Error", f"Failed to open video:\n{path}")
+            QMessageBox.warning(self, "Error", f"Failed to open video:\n{self.video_path}")
             self.video_path = None
             self.cap = None
             return
@@ -400,14 +471,43 @@ class VideoSyncWidget(QWidget):
         # Get video properties
         self.video_fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
         self.video_frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # Handle invalid frame count (can happen with some video formats)
+        if self.video_frame_count <= 0 or self.video_frame_count > 1e12:
+            print(f"Warning: Invalid frame count from cv2: {self.video_frame_count}")
+            # Estimate based on streaming window for large files
+            if getattr(self, '_use_streaming_mode', False):
+                self.video_frame_count = int(self.video_window_length * 2 * self.video_fps)
+            else:
+                self.video_frame_count = int(3600 * self.video_fps)  # Default to 1 hour
+        
         self.video_duration = self.video_frame_count / self.video_fps
         
+        # For streaming mode, limit effective duration to the window to avoid UI issues
+        if getattr(self, '_use_streaming_mode', False):
+            self.video_duration = min(self.video_duration, self.video_window_length * 2)
+            self.video_frame_count = int(self.video_duration * self.video_fps)
+            print(f"  Streaming mode: limiting display to {self.video_duration:.1f}s window")
+        
         # Update UI
-        self.video_path_label.setText(Path(path).name)
-        self.video_path_label.setStyleSheet("color: green;")
+        original_name = Path(self.original_video_path or path).name
+        if is_large_file:
+            if getattr(self, '_use_streaming_mode', False):
+                self.video_path_label.setText(f"{original_name} (streaming)")
+                self.video_path_label.setStyleSheet("color: yellow;")
+            else:
+                self.video_path_label.setText(f"{original_name} (segment)")
+                self.video_path_label.setStyleSheet("color: orange;")
+        else:
+            self.video_path_label.setText(original_name)
+            self.video_path_label.setStyleSheet("color: green;")
         
         # Set slider range (in milliseconds for precision)
-        self.seek_slider.setRange(0, int(self.video_duration * 1000))
+        # Cap at max int32 to avoid overflow (about 24 days max)
+        # Apply min BEFORE int conversion to prevent overflow
+        duration_ms = self.video_duration * 1000
+        max_slider_ms = int(min(duration_ms, 2147483647.0))
+        self.seek_slider.setRange(0, max_slider_ms)
         
         # Display first frame
         self.current_frame_idx = 0
@@ -416,17 +516,296 @@ class VideoSyncWidget(QWidget):
         
         print(f"Video loaded: {path}")
         print(f"  FPS: {self.video_fps:.2f}, Duration: {self.video_duration:.2f}s, Frames: {self.video_frame_count}")
+        if is_large_file:
+            print(f"  Segment offset: {self.segment_start_time:.2f}s")
+            if getattr(self, '_use_streaming_mode', False):
+                print(f"  Mode: Streaming (seeking by time)")
+    
+    def _setup_streaming_mode(self, path, center_time):
+        """Setup streaming mode for large videos when ffmpeg is not available.
+        
+        In streaming mode, we open the video directly but limit playback to a window.
+        We use CAP_PROP_POS_MSEC for seeking which is more reliable for large files.
+        """
+        self._use_streaming_mode = True
+        self.video_path = path
+        self.segment_start_time = max(0, center_time - self.video_window_length)
+        self._streaming_end_time = center_time + self.video_window_length
+        self._original_video_duration = None  # Will be set when we read the file
+        self.temp_segment_path = None
+    
+    def _get_ffmpeg_path(self, tool='ffmpeg'):
+        """Get path to ffmpeg/ffprobe, checking bundled location first.
+        
+        Parameters:
+        -----------
+        tool : str
+            'ffmpeg' or 'ffprobe'
+            
+        Returns:
+        --------
+        str
+            Path to the tool (bundled path if exists, otherwise just the name for PATH lookup)
+        """
+        import sys
+        
+        # Check if running as bundled exe
+        if getattr(sys, 'frozen', False):
+            # Look for bundled ffmpeg next to the exe
+            exe_dir = Path(sys.executable).parent
+            bundled_path = exe_dir / f'{tool}.exe'
+            if bundled_path.exists():
+                return str(bundled_path)
+        
+        # Fallback to PATH lookup
+        return tool
+    
+    def _get_video_duration_ffprobe(self, path):
+        """Get video duration using ffprobe (fast, doesn't load whole file).
+        
+        Tries multiple methods for compatibility with different formats (especially MKV).
+        
+        Returns:
+        --------
+        float or None
+            Video duration in seconds, or None if failed
+        """
+        ffprobe_path = self._get_ffmpeg_path('ffprobe')
+        
+        # Method 1: Try getting duration from format
+        try:
+            cmd = [
+                ffprobe_path, '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                duration_str = result.stdout.strip()
+                if duration_str and duration_str != 'N/A':
+                    print(f"ffprobe format duration: {duration_str}s")
+                    return float(duration_str)
+        except Exception as e:
+            print(f"ffprobe format duration error: {e}")
+        
+        # Method 2: Try getting duration from first video stream (for MKV)
+        try:
+            cmd = [
+                ffprobe_path, '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                duration_str = result.stdout.strip()
+                if duration_str and duration_str != 'N/A':
+                    print(f"ffprobe stream duration: {duration_str}s")
+                    return float(duration_str)
+        except Exception as e:
+            print(f"ffprobe stream duration error: {e}")
+        
+        # Method 3: Calculate from frame count and frame rate (slower but works for most MKV)
+        try:
+            cmd = [
+                ffprobe_path, '-v', 'error',
+                '-select_streams', 'v:0',
+                '-count_frames',
+                '-show_entries', 'stream=nb_read_frames,r_frame_rate',
+                '-of', 'default=noprint_wrappers=1',
+                path
+            ]
+            print(f"Trying ffprobe frame count method (this may take a moment for large files)...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # Longer timeout
+            if result.returncode == 0:
+                output = result.stdout
+                # Parse nb_read_frames and r_frame_rate
+                frames = None
+                fps = None
+                for line in output.strip().split('\n'):
+                    if 'nb_read_frames=' in line:
+                        frames = int(line.split('=')[1])
+                    elif 'r_frame_rate=' in line:
+                        rate_str = line.split('=')[1]
+                        if '/' in rate_str:
+                            num, den = rate_str.split('/')
+                            fps = float(num) / float(den)
+                        else:
+                            fps = float(rate_str)
+                
+                if frames and fps:
+                    duration = frames / fps
+                    print(f"ffprobe calculated duration: {duration:.2f}s ({frames} frames at {fps:.2f} fps)")
+                    return duration
+        except Exception as e:
+            print(f"ffprobe frame count error: {e}")
+        
+        print("ffprobe: Could not determine video duration")
+        return None
+    
+    def _extract_video_segment(self, source_path, start_time, duration):
+        """Extract a video segment using ffmpeg.
+        
+        Parameters:
+        -----------
+        source_path : str
+            Path to source video
+        start_time : float
+            Start time in seconds
+        duration : float
+            Duration in seconds
+            
+        Returns:
+        --------
+        str or None
+            Path to extracted segment, or None if failed
+        """
+        try:
+            # Create temp file
+            temp_dir = tempfile.gettempdir()
+            temp_path = Path(temp_dir) / f"meeg_video_segment_{id(self)}.mp4"
+            
+            # Get ffmpeg path (bundled or from PATH)
+            ffmpeg_path = self._get_ffmpeg_path('ffmpeg')
+            
+            # Use accurate seeking for precision:
+            # Fast input seek to slightly before target, then precise output seek
+            # This is slower than pure input seeking but frame-accurate
+            pre_seek = max(0, start_time - 10)  # Seek 10s before for accuracy
+            output_seek = start_time - pre_seek  # Precise offset
+            
+            cmd = [
+                ffmpeg_path, '-y',  # Overwrite output
+                '-ss', str(pre_seek),  # Fast input seek to near target
+                '-i', source_path,  # Input file
+                '-ss', str(output_seek),  # Precise output seek (frame-accurate)
+                '-t', str(duration),  # Duration
+                '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',  # Re-encode for precision
+                '-c:a', 'aac', '-b:a', '128k',
+                '-avoid_negative_ts', 'make_zero',
+                str(temp_path)
+            ]
+            
+            print(f"Running ffmpeg (accurate seek): input_seek={pre_seek:.2f}s, output_seek={output_seek:.2f}s")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode == 0 and temp_path.exists():
+                print(f"Segment extracted to: {temp_path}")
+                return str(temp_path)
+            else:
+                print(f"ffmpeg error: {result.stderr}")
+                
+                # Fallback: try simpler approach with just output seeking (slower but most accurate)
+                print("Retrying with output-only seeking...")
+                cmd = [
+                    ffmpeg_path, '-y',
+                    '-i', source_path,
+                    '-ss', str(start_time),  # Output seeking (frame-accurate but slower)
+                    '-t', str(duration),
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
+                    '-c:a', 'aac', '-b:a', '128k',
+                    str(temp_path)
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                
+                if result.returncode == 0 and temp_path.exists():
+                    print(f"Segment extracted (output seek) to: {temp_path}")
+                    return str(temp_path)
+                else:
+                    print(f"ffmpeg output seek error: {result.stderr}")
+                    
+        except subprocess.TimeoutExpired:
+            print("ffmpeg timed out")
+        except Exception as e:
+            print(f"Segment extraction error: {e}")
+        return None
+    
+    def _cleanup_temp_segment(self):
+        """Clean up temporary video segment file."""
+        if self.temp_segment_path and Path(self.temp_segment_path).exists():
+            try:
+                Path(self.temp_segment_path).unlink()
+                print(f"Cleaned up temp segment: {self.temp_segment_path}")
+            except Exception as e:
+                print(f"Failed to cleanup temp segment: {e}")
+        self.temp_segment_path = None
+    
+    def reload_segment_for_epoch(self, epoch_idx):
+        """Reload video segment centered on the given epoch (for large files).
+        
+        Parameters:
+        -----------
+        epoch_idx : int
+            The epoch to center the segment on
+        """
+        if self.original_video_path is None:
+            # Not a large file, no need to reload
+            return
+        
+        # Calculate the desired center time
+        desired_center = epoch_idx * self.epoch_length + self.time_offset
+        
+        # Check if current segment covers this time
+        segment_end = self.segment_start_time + self.video_duration
+        margin = 10.0  # seconds of margin before reloading
+        
+        if (desired_center >= self.segment_start_time + margin and 
+            desired_center <= segment_end - margin):
+            # Current segment covers the epoch with enough margin
+            return
+        
+        print(f"Reloading segment for epoch {epoch_idx} (center time: {desired_center:.2f}s)")
+        self.load_video(self.original_video_path, center_time=desired_center)
         
     def _display_current_frame(self):
         """Read and display the current frame."""
         if self.cap is None:
             return
-            
-        # Seek to current frame
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
+        
+        # Use time-based seeking for streaming mode (more reliable for large files)
+        if getattr(self, '_use_streaming_mode', False):
+            # Calculate time position and seek by milliseconds
+            time_pos_ms = (self.current_frame_idx / self.video_fps) * 1000 + self.segment_start_time * 1000
+            self.cap.set(cv2.CAP_PROP_POS_MSEC, time_pos_ms)
+        else:
+            # Standard frame-based seeking for normal/segment mode
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
+        
         ret, frame = self.cap.read()
         
         if not ret:
+            return
+            
+        # Convert BGR to RGB
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Get label size for scaling
+        label_size = self.video_label.size()
+        target_w = label_size.width() - 10
+        target_h = label_size.height() - 10
+        
+        if target_w > 0 and target_h > 0:
+            # Calculate aspect-preserving size
+            h, w = frame_rgb.shape[:2]
+            scale = min(target_w / w, target_h / h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            
+            if new_w > 0 and new_h > 0:
+                frame_rgb = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        
+        # Convert to QPixmap
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+        q_img = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(q_img)
+        
+        self.video_label.setPixmap(pixmap)
+    
+    def _display_frame(self, frame):
+        """Display a pre-read frame (for use with streaming mode seeking)."""
+        if frame is None:
             return
             
         # Convert BGR to RGB
@@ -461,12 +840,20 @@ class VideoSyncWidget(QWidget):
             
         self.current_frame_idx += 1
         
-        # Check bounds
-        if self.current_frame_idx >= self.video_frame_count:
-            self.stop_playback()
-            return
-            
-        self._display_current_frame()
+        # Check bounds (for non-streaming mode)
+        if not getattr(self, '_use_streaming_mode', False):
+            if self.current_frame_idx >= self.video_frame_count:
+                self.stop_playback()
+                return
+        
+        # During playback, read frames sequentially (fast) instead of seeking (slow)
+        self._read_and_display_next_frame()
+        
+        # For streaming mode, get actual time from cv2 instead of calculating from frame index
+        if getattr(self, '_use_streaming_mode', False):
+            actual_time_ms = self.cap.get(cv2.CAP_PROP_POS_MSEC)
+            self._current_video_time = actual_time_ms / 1000.0  # Store actual time in seconds
+        
         self._update_time_display()
         
         # Sync mosaic and topography periodically (every 5 frames to reduce overhead)
@@ -475,16 +862,65 @@ class VideoSyncWidget(QWidget):
             
         # Update slider if not being dragged
         if not self._slider_dragging:
-            current_time_ms = int((self.current_frame_idx / self.video_fps) * 1000)
-            self.seek_slider.setValue(current_time_ms)
+            if getattr(self, '_use_streaming_mode', False):
+                # In streaming mode, slider position is based on window around current position
+                window_pos = getattr(self, '_current_video_time', 0) - self.segment_start_time
+                current_time_ms = int(max(0, window_pos) * 1000)
+            else:
+                current_time_ms = int((self.current_frame_idx / self.video_fps) * 1000)
+            self.seek_slider.setValue(min(current_time_ms, 2147483647))
+    
+    def _read_and_display_next_frame(self):
+        """Read and display the next frame sequentially (no seeking - fast for playback)."""
+        if self.cap is None:
+            return
+        
+        # Just read the next frame without seeking (fast sequential read)
+        ret, frame = self.cap.read()
+        
+        if not ret:
+            return
+            
+        # Convert BGR to RGB
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Get label size for scaling
+        label_size = self.video_label.size()
+        target_w = label_size.width() - 10
+        target_h = label_size.height() - 10
+        
+        if target_w > 0 and target_h > 0:
+            # Calculate aspect-preserving size
+            h, w = frame_rgb.shape[:2]
+            scale = min(target_w / w, target_h / h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            
+            if new_w > 0 and new_h > 0:
+                frame_rgb = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        
+        # Convert to QPixmap
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+        q_img = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(q_img)
+        
+        self.video_label.setPixmap(pixmap)
             
     def _sync_mosaic_and_topo(self):
         """Sync mosaic timeline and topography with current video time."""
         if self.cap is None:
             return
-            
-        video_time = self.current_frame_idx / self.video_fps
-        eeg_time = video_time - self.time_offset
+        
+        # Get actual video time
+        if getattr(self, '_use_streaming_mode', False):
+            # In streaming mode, use the actual time from cv2
+            original_video_time = getattr(self, '_current_video_time', self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0)
+        else:
+            # Calculate time accounting for segment offset
+            segment_time = self.current_frame_idx / self.video_fps
+            original_video_time = segment_time + self.segment_start_time
+        
+        eeg_time = original_video_time - self.time_offset
         
         # Update mosaic timeline
         self.mosaic_timeline.set_current_time(eeg_time)
@@ -499,18 +935,34 @@ class VideoSyncWidget(QWidget):
         """Update the time label and epoch label."""
         if self.cap is None:
             return
-            
-        current_time = self.current_frame_idx / self.video_fps
         
-        pos_str = self._format_time(current_time)
+        # Get the actual video time
+        if getattr(self, '_use_streaming_mode', False):
+            # In streaming mode, use the actual time from cv2
+            original_video_time = getattr(self, '_current_video_time', self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0)
+            segment_time = original_video_time - self.segment_start_time
+        else:
+            # Current time in segment (calculated from frame index)
+            segment_time = self.current_frame_idx / self.video_fps
+            # Actual time in original video (accounting for segment offset)
+            original_video_time = segment_time + self.segment_start_time
+        
+        # For display, show segment time / segment duration
+        pos_str = self._format_time(max(0, segment_time))
         dur_str = self._format_time(self.video_duration)
-        self.time_label.setText(f"{pos_str} / {dur_str}")
         
-        # Calculate EEG time
-        eeg_time = current_time - self.time_offset
+        if self.original_video_path or getattr(self, '_use_streaming_mode', False):
+            # For large files, also show original video time
+            orig_time_str = self._format_time(original_video_time)
+            self.time_label.setText(f"{pos_str} / {dur_str} (orig: {orig_time_str})")
+        else:
+            self.time_label.setText(f"{pos_str} / {dur_str}")
+        
+        # Calculate EEG time (based on original video time)
+        eeg_time = original_video_time - self.time_offset
         epoch = int(eeg_time / self.epoch_length) if self.epoch_length > 0 else 0
         
-        self.epoch_label.setText(f"Epoch: {epoch} | EEG: {eeg_time:.2f}s | Video: {current_time:.2f}s")
+        self.epoch_label.setText(f"Epoch: {epoch} | EEG: {eeg_time:.2f}s | Video: {original_video_time:.2f}s")
         
     def _format_time(self, seconds):
         """Format seconds to MM:SS."""
@@ -532,6 +984,12 @@ class VideoSyncWidget(QWidget):
         """Start video playback."""
         if self.cap is None:
             return
+        
+        # For non-streaming mode, seek to ensure we're at the right position
+        # For streaming mode, we're already at the right position from seek_to_epoch
+        if not getattr(self, '_use_streaming_mode', False):
+            self._display_current_frame()
+        # In streaming mode, cv2 maintains position, so just start reading
             
         self.is_playing = True
         self.play_btn.setText("⏸ Pause")
@@ -608,6 +1066,13 @@ class VideoSyncWidget(QWidget):
         eeg_time = epoch_idx * self.epoch_length
         video_time = eeg_time + self.time_offset
         
+        print(f"\n=== Seeking to epoch {epoch_idx} ===")
+        print(f"  EEG time: {eeg_time:.2f}s, Video time: {video_time:.2f}s, Time offset: {self.time_offset:.2f}s")
+        
+        # For large files with ffmpeg, check if we need to reload the segment
+        if self.original_video_path is not None and not getattr(self, '_use_streaming_mode', False):
+            self.reload_segment_for_epoch(epoch_idx)
+        
         # Update mosaic timeline
         self.mosaic_timeline.set_current_time(eeg_time)
         
@@ -617,15 +1082,59 @@ class VideoSyncWidget(QWidget):
         
         # Seek video
         if self.cap is not None and video_time >= 0:
-            target_frame = int(video_time * self.video_fps)
-            target_frame = max(0, min(target_frame, self.video_frame_count - 1))
-            self.current_frame_idx = target_frame
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-            self._display_current_frame()
-            self._update_time_display()
+            if getattr(self, '_use_streaming_mode', False):
+                # Streaming mode: seek by FRAME (time-based seeking often fails on large files)
+                target_frame = int(video_time * self.video_fps)
+                
+                print(f"  Streaming mode seek to frame: {target_frame} (time: {video_time:.2f}s)")
+                
+                # Try frame-based seeking (more reliable than time-based for many formats)
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                
+                # Verify seek worked by checking actual position
+                actual_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+                print(f"  Actual frame after seek: {actual_frame}")
+                
+                # If seek failed badly, try reopening video and seeking again
+                if abs(actual_frame - target_frame) > int(5 * self.video_fps):
+                    print(f"  WARNING: Seek may have failed, reopening video...")
+                    self.cap.release()
+                    self.cap = cv2.VideoCapture(self.video_path)
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                    actual_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+                    print(f"  After reopen, frame: {actual_frame}")
+                
+                # Update tracking variables based on actual position
+                self._current_video_time = actual_frame / self.video_fps
+                self.segment_start_time = max(0, self._current_video_time - self.video_window_length)
+                self.current_frame_idx = 0  # Reset for virtual segment tracking
+                
+                # Read and display the frame after seeking
+                ret, frame = self.cap.read()
+                if ret:
+                    self._display_frame(frame)
+                    # Update time after reading frame
+                    actual_frame_now = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+                    self._current_video_time = actual_frame_now / self.video_fps
+                    print(f"  Frame displayed successfully at {self._current_video_time:.2f}s (frame {actual_frame_now})")
+            else:
+                # Segment/normal mode: seek by frame position
+                segment_time = video_time - self.segment_start_time
+                if segment_time < 0:
+                    segment_time = 0
+                elif segment_time > self.video_duration:
+                    segment_time = self.video_duration
+                
+                target_frame = int(segment_time * self.video_fps)
+                target_frame = max(0, min(target_frame, self.video_frame_count - 1))
+                self.current_frame_idx = target_frame
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                self._display_current_frame()
+                
+                # Update slider (show segment time)
+                self.seek_slider.setValue(int(segment_time * 1000))
             
-            # Update slider
-            self.seek_slider.setValue(int(video_time * 1000))
+            self._update_time_display()
             
         print(f"Seeking to epoch {epoch_idx}: EEG={eeg_time:.2f}s, Video={video_time:.2f}s")
         
@@ -670,6 +1179,7 @@ class VideoSyncWidget(QWidget):
             epoch_length=self.epoch_length,
             time_offset=self.time_offset,
             theme_colors=self.theme_colors,
+            segment_start_time=self.segment_start_time,  # Pass segment offset for proper time sync
             parent=self
         )
         dialog.exec()
@@ -679,4 +1189,6 @@ class VideoSyncWidget(QWidget):
         self.playback_timer.stop()
         if self.cap is not None:
             self.cap.release()
+        # Clean up temp video segment
+        self._cleanup_temp_segment()
         super().closeEvent(event)

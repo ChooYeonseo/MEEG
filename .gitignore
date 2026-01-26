@@ -3,6 +3,8 @@ cache/*
 dist/*
 build/*
 releases/*
+# FFmpeg binaries (large, should not be in repo)
+ffmpeg/
 # Python cache files
 __pycache__/
 *.pyc

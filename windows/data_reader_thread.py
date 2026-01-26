@@ -8,6 +8,7 @@ EEG data in a separate thread to prevent GUI freezing.
 import sys
 import time
 import traceback
+import io
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -25,8 +26,10 @@ try:
     import read_intan
     from cache_manager import cache_manager
 except ImportError as e:
-    print(f"Error importing read_intan utilities: {e}")
-    traceback.print_exc()
+    # Safe print that won't crash if stdout is None
+    if sys.stdout:
+        print(f"Error importing read_intan utilities: {e}")
+        traceback.print_exc()
 
 
 class DataReaderThread(QThread):
@@ -49,14 +52,35 @@ class DataReaderThread(QThread):
     def set_output_capture(self, output_capture):
         """Set the output capture object."""
         self.output_capture = output_capture
+    
+    def _safe_print(self, msg):
+        """Print that works even when console=False (stdout is None)."""
+        if self.output_capture:
+            try:
+                self.output_capture.write(str(msg) + '\n')
+            except:
+                pass
+        elif sys.stdout:
+            try:
+                print(msg)
+            except:
+                pass
         
     def run(self):
         """Run the data reading process."""
+        # Save original stdout/stderr in case we need to restore
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        
         try:
-            # Redirect stdout to capture print statements
+            # Redirect stdout to capture print statements (safe even when console=False)
             if self.output_capture:
                 sys.stdout = self.output_capture
                 sys.stderr = self.output_capture
+            elif not sys.stdout:
+                # When console=False, stdout is None - create a dummy
+                sys.stdout = io.StringIO()
+                sys.stderr = io.StringIO()
             
             file_type_upper = self.file_type.upper()
             
@@ -116,15 +140,15 @@ class DataReaderThread(QThread):
                 
         except Exception as e:
             error_msg = f"Error reading data: {str(e)}"
-            print(error_msg)
-            traceback.print_exc()
+            if sys.stdout:
+                print(error_msg)
+                traceback.print_exc()
             self.error_occurred.emit(error_msg)
             
         finally:
             # Restore original stdout/stderr
-            if self.output_capture:
-                sys.stdout = self.output_capture.original_stdout
-                sys.stderr = self.output_capture.original_stderr
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
             self.finished_loading.emit()
     
     def read_csv_files(self, csv_file_paths, sampling_rate):

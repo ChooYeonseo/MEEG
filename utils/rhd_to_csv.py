@@ -12,9 +12,18 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
+# PyInstaller-aware path resolution
+def get_base_path():
+    """Get base path, works for both dev and PyInstaller bundle."""
+    if getattr(sys, 'frozen', False):
+        # Running in a PyInstaller bundle
+        return Path(sys._MEIPASS)
+    else:
+        # Running in development
+        return Path(__file__).parent.parent
+
 # Add the load-rhd-notebook-python directory to the Python path
-current_dir = Path(__file__).parent
-rhd_utils_dir = current_dir.parent / "load-rhd-notebook-python"
+rhd_utils_dir = get_base_path() / "load-rhd-notebook-python"
 sys.path.insert(0, str(rhd_utils_dir))
 
 # Import the RHD utilities

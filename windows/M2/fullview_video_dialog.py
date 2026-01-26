@@ -28,7 +28,8 @@ class FullViewVideoDialog(QDialog):
     """Dialog for combined video preview and export."""
     
     def __init__(self, video_path, df, mosaic_relationships, electrode_positions,
-                 sampling_rate, epoch_length, time_offset, theme_colors=None, parent=None):
+                 sampling_rate, epoch_length, time_offset, theme_colors=None, 
+                 segment_start_time=0.0, parent=None):
         super().__init__(parent)
         self.video_path = video_path
         self.df = df
@@ -37,6 +38,7 @@ class FullViewVideoDialog(QDialog):
         self.sampling_rate = sampling_rate
         self.epoch_length = epoch_length
         self.time_offset = time_offset
+        self.segment_start_time = segment_start_time  # Offset for segment-extracted videos
         self.theme_colors = theme_colors or {'bg_primary': '#1a1a1a', 'fg_primary': '#ffffff'}
         
         # Video capture
@@ -274,9 +276,10 @@ class FullViewVideoDialog(QDialog):
         if not ret:
             return
             
-        # Get video time at this position
-        video_time = (total_frames // 2) / self.video_fps
-        eeg_time = video_time - self.time_offset
+        # Get video time at this position (accounting for segment offset)
+        segment_time = (total_frames // 2) / self.video_fps
+        original_video_time = segment_time + self.segment_start_time
+        eeg_time = original_video_time - self.time_offset
         
         # Render combined frame
         combined = self.render_combined_frame(video_frame, eeg_time)
@@ -368,9 +371,10 @@ class FullViewVideoDialog(QDialog):
             if not ret:
                 break
                 
-            # Calculate times
-            video_time = frame_idx / self.video_fps
-            eeg_time = video_time - self.time_offset
+            # Calculate times (accounting for segment offset)
+            segment_time = frame_idx / self.video_fps
+            original_video_time = segment_time + self.segment_start_time
+            eeg_time = original_video_time - self.time_offset
             
             # Render and write combined frame
             combined = self.render_combined_frame(video_frame, eeg_time)

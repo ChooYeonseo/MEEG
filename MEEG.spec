@@ -44,10 +44,28 @@ added_files = [
     ('config.py', '.'),
 ]
 
+# FFmpeg binaries - bundle if available in project root
+# To bundle ffmpeg: download from https://www.gyan.dev/ffmpeg/builds/
+# and extract ffmpeg.exe + ffprobe.exe to a 'ffmpeg' folder in project root
+ffmpeg_binaries = []
+ffmpeg_dir = project_root / 'ffmpeg'
+if ffmpeg_dir.exists():
+    ffmpeg_exe = ffmpeg_dir / 'ffmpeg.exe'
+    ffprobe_exe = ffmpeg_dir / 'ffprobe.exe'
+    if ffmpeg_exe.exists():
+        ffmpeg_binaries.append((str(ffmpeg_exe), '.'))
+        print(f"Bundling ffmpeg: {ffmpeg_exe}")
+    if ffprobe_exe.exists():
+        ffmpeg_binaries.append((str(ffprobe_exe), '.'))
+        print(f"Bundling ffprobe: {ffprobe_exe}")
+else:
+    print("Note: ffmpeg folder not found. Video segment extraction will use fallback mode.")
+    print("      To bundle ffmpeg, create 'ffmpeg/' folder with ffmpeg.exe and ffprobe.exe")
+
 a = Analysis(
     ['meeg.py'],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=ffmpeg_binaries,
     datas=added_files,
     hiddenimports=[
         'PyQt6',
@@ -75,6 +93,7 @@ a = Analysis(
         'requests',  # For auto-update
         'pickle',
         'openpyxl',
+        'importrhdutilities',  # RHD file loading module
     ],
     hookspath=[],
     hooksconfig={},
@@ -98,7 +117,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # Set to False for GUI app (no terminal window)
+    console=True,  # Set to True for debugging (shows terminal window with errors)
     disable_windowed_traceback=False,
     argv_emulation=False if is_windows else True,  # Only for macOS
     target_arch=None,
