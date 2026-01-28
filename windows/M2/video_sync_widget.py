@@ -46,6 +46,7 @@ class MosaicTimelineWidget(QWidget):
         self.spacing = 300
         self.spacing_cluster = 600
         self.limit = 400
+        self.scale_val = 200  # Default scale in µV
         
         self.init_ui()
         
@@ -53,6 +54,25 @@ class MosaicTimelineWidget(QWidget):
         """Initialize the UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
+        
+        # Controls layout
+        controls_layout = QHBoxLayout()
+        controls_layout.addStretch()
+        
+        # Scale selector
+        scale_label = QLabel("Scale:")
+        scale_label.setStyleSheet(f"color: {self.theme_colors['fg_primary']}")
+        controls_layout.addWidget(scale_label)
+        
+        self.scale_combo = QComboBox()
+        self.scale_combo.addItems(["50", "100", "200", "400", "800"])
+        self.scale_combo.setCurrentText("200")
+        self.scale_combo.currentTextChanged.connect(self.on_scale_changed)
+        controls_layout.addWidget(self.scale_combo)
+        
+        controls_layout.addWidget(QLabel("µV"))
+        
+        layout.addLayout(controls_layout)
         
         # Create matplotlib figure
         self.figure = Figure(figsize=(8, 4), facecolor='white', edgecolor='white')
@@ -62,6 +82,19 @@ class MosaicTimelineWidget(QWidget):
         
         # Time marker line (will be updated)
         self.time_marker_line = None
+        
+    def on_scale_changed(self, text):
+        """Handle scale change."""
+        try:
+            self.scale_val = int(text)
+            # Update spacing and limit based on ratio to default (200)
+            ratio = self.scale_val / 200.0
+            self.spacing = 300 * ratio
+            self.spacing_cluster = 600 * ratio
+            self.limit = 400 * ratio
+            self.update_plot()
+        except ValueError:
+            pass
         
     def set_data(self, df, mosaic_relationships, sampling_rate, epoch_length):
         """Set the EEG data."""

@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
@@ -36,6 +36,7 @@ class MosaicPlotterWidget(QWidget):
         self.spacing = 300  # spacing within each montage pair (µV)
         self.spacing_cluster = 600  # spacing between montage clusters (µV)
         self.limit = 400  # Y-axis margin
+        self.scale_val = 200  # Default scale
         
         self.init_ui()
         
@@ -43,6 +44,10 @@ class MosaicPlotterWidget(QWidget):
         """Initialize the user interface."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
+        
+        # Header layout (Title + Scale)
+        header_layout = QHBoxLayout()
+        header_layout.addStretch()
         
         # Title
         title_label = QLabel("EEG Montage Display")
@@ -52,6 +57,23 @@ class MosaicPlotterWidget(QWidget):
         title_label.setFont(title_font)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
+        
+        # Scale selector (add after title or in a separate row? Let's verify existing layout)
+        # The existing layout adds title directly to QVBoxLayout.
+        # Let's create a controls row below title.
+        
+        controls_layout = QHBoxLayout()
+        controls_layout.addStretch()
+        controls_layout.addWidget(QLabel("Scale:"))
+        
+        self.scale_combo = QComboBox()
+        self.scale_combo.addItems(["50", "100", "200", "400", "800"])
+        self.scale_combo.setCurrentText("200")
+        self.scale_combo.currentTextChanged.connect(self.on_scale_changed)
+        controls_layout.addWidget(self.scale_combo)
+        controls_layout.addWidget(QLabel("µV"))
+        
+        layout.addLayout(controls_layout)
         
         # Create matplotlib figure with white background
         self.figure = Figure(figsize=(12, 6), facecolor='white', edgecolor='white')
@@ -65,6 +87,19 @@ class MosaicPlotterWidget(QWidget):
         
         # Initialize the plot
         self.update_plot()
+        
+    def on_scale_changed(self, text):
+        """Handle scale change."""
+        try:
+            self.scale_val = int(text)
+            # Update spacing and limit based on ratio to default (200)
+            ratio = self.scale_val / 200.0
+            self.spacing = 300 * ratio
+            self.spacing_cluster = 600 * ratio
+            self.limit = 400 * ratio
+            self.update_plot()
+        except ValueError:
+            pass
         
     def on_click(self, event):
         """Handle mouse click events on the plot."""
@@ -219,7 +254,7 @@ class MosaicPlotterWidget(QWidget):
                        [scale_bar_y_start, scale_bar_y_end], 
                        'r-', linewidth=2)
             ax.text(scale_bar_x + 0.3, (scale_bar_y_start + scale_bar_y_end) / 2,
-                       '200µV', color='red', fontsize=8, va='center')
+                       f'{self.scale_val}µV', color='red', fontsize=8, va='center')
         
         # Set axis properties
         ax.set_yticks(y_ticks)

@@ -7,10 +7,10 @@ used throughout the application.
 
 # Application metadata
 APP_NAME = "EEG Analysis Tool"
-APP_VERSION = "0.0.10"
+APP_VERSION = "0.1.1"
 GITHUB_REPO = "ChooYeonseo/MEEG"
-ORGANIZATION_NAME = "EEG Research"
-ORGANIZATION_DOMAIN = "eeg-research.org"
+ORGANIZATION_NAME = "Korea University College of Medicine - Link Lab"
+ORGANIZATION_DOMAIN = "http://link.korea.ac.kr/"
 
 # Window settings
 DEFAULT_WINDOW_WIDTH = 1000
