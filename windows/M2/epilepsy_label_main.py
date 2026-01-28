@@ -625,6 +625,32 @@ class EpilepsyLabelWindow(QWidget):
         
         # Initialize epoch display
         self.update_epoch_displays()
+        
+    def keyPressEvent(self, event):
+        """Handle keyboard navigation."""
+        # Check for navigation keys
+        if event.key() == Qt.Key.Key_Right:
+            self.navigate_epoch(1)
+            event.accept()
+        elif event.key() == Qt.Key.Key_Left:
+            self.navigate_epoch(-1)
+            event.accept()
+        elif event.text() == '.': # >
+            self.navigate_epoch(self.mosaic_epochs_to_show)
+            event.accept()
+        elif event.text() == ',': # <
+            self.navigate_epoch(-self.mosaic_epochs_to_show)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def navigate_epoch(self, delta):
+        n_epochs = self.get_n_epochs()
+        new_epoch = max(0, min(n_epochs - 1, self.current_epoch + delta))
+        if new_epoch != self.current_epoch:
+            print(f"Navigating to epoch {new_epoch} (delta: {delta})")
+            self.current_epoch = new_epoch
+            self.update_epoch_displays()
 
         
     def create_control_panel(self):

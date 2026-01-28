@@ -38,6 +38,9 @@ class MosaicPlotterWidget(QWidget):
         self.limit = 400  # Y-axis margin
         self.scale_val = 200  # Default scale
         
+        # Enable focus by click to handle keyboard events properly
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        
         self.init_ui()
         
     def init_ui(self):
@@ -82,6 +85,10 @@ class MosaicPlotterWidget(QWidget):
         
         # Connect click event
         self.canvas.mpl_connect('button_press_event', self.on_click)
+        
+        # CRITICAL: Override canvas keyPressEvent to prevent it from swallowing keys
+        # This allows arrow keys to bubble up to the main window for navigation
+        self.canvas.keyPressEvent = lambda event: event.ignore()
         
         layout.addWidget(self.canvas)
         
@@ -321,3 +328,17 @@ class MosaicPlotterWidget(QWidget):
         self.mosaic_relationships = mosaic_relationships or []
         self.sampling_rate = sampling_rate or 1000.0
         self.update_plot()
+    
+    def keyPressEvent(self, event):
+        """Forward keyboard events to parent window for navigation.
+        
+        When the mosaic widget has focus (e.g., after clicking on it),
+        forward key events to the parent PreviewWindow so that 
+        arrow keys and comma/period keys work for epoch navigation.
+        """
+        # Forward key event to parent window if it exists
+        parent_window = self.window()
+        if parent_window and parent_window != self:
+            parent_window.keyPressEvent(event)
+        else:
+            super().keyPressEvent(event)

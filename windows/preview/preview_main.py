@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QDialog, QDoubleSpinBox, QCheckBox, QComboBox,
                              QDialogButtonBox, QMenuBar, QTabWidget,
                              QInputDialog)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -448,11 +448,57 @@ class PreviewWindow(QWidget):
         
         # Initialize epoch display
         self.update_epoch_displays()
+        
+        # Set focus to mosaic plotter so keyboard navigation works immediately
+        self.mosaic_plotter.setFocus()
+        
+        # Install event filter on key child widgets to capture keyboard events
+        # This ensures arrow keys and comma/period work regardless of which widget has focus
+        self._install_key_event_filters()
 
+    def _install_key_event_filters(self):
+        """Install event filters on child widgets to capture keyboard events.
+        
+        This ensures that arrow keys, comma, period, and 'A' key work for navigation
+        regardless of which child widget has focus (control panel, mosaic plot, etc.).
+        """
+        from PyQt6.QtCore import QEvent
+        
+        # Install event filter on the control panel and its children
+        if hasattr(self, 'control_panel'):
+            self.control_panel.installEventFilter(self)
+            # Also install on children of control panel
+            for child in self.control_panel.findChildren(QWidget):
+                child.installEventFilter(self)
+    
+    def eventFilter(self, obj, event):
+        """Filter keyboard events from child widgets for navigation.
+        
+        Intercepts KeyPress events for navigation keys (arrows, comma, period, A)
+        and handles them, allowing other keys to pass through normally.
+        """
+        from PyQt6.QtCore import QEvent
+        
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            
+            # Check for navigation keys
+            if key in (Qt.Key.Key_Left, Qt.Key.Key_Right, 
+                       Qt.Key.Key_Comma, Qt.Key.Key_Less,
+                       Qt.Key.Key_Period, Qt.Key.Key_Greater,
+                       Qt.Key.Key_A):
+                # Handle the event in keyPressEvent
+                self.keyPressEvent(event)
+                return True  # Event was handled
+        
+        # Let other events pass through
+        return super().eventFilter(obj, event)
         
     def create_control_panel(self):
         """Create the control panel widget."""
         panel = QWidget()
+        # Enable focus so keyboard events work when control panel is clicked
+        panel.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(10)
@@ -501,6 +547,8 @@ class PreviewWindow(QWidget):
         self.epoch_spin.setSingleStep(0.1)
         self.epoch_spin.setSuffix(" sec")
         self.epoch_spin.setDecimals(3)
+        # Disable keyboard tracking so valueChanged only fires on Enter or focus loss
+        self.epoch_spin.setKeyboardTracking(False)
         self.epoch_spin.valueChanged.connect(self.on_epoch_length_changed)
         epoch_layout.addRow("Epoch Length:", self.epoch_spin)
         
@@ -804,10 +852,20 @@ class PreviewWindow(QWidget):
     # ----------------------------------------------------------------------
     
     def keyPressEvent(self, event):
-        """Handle keyboard navigation."""
-        key = event.key()
-        modifiers = event.modifiers()
+        """Handle keyboard navigation and global shortcuts.
         
+        Arrow Keys:
+            - Left Arrow: Move back 1 epoch
+            - Right Arrow: Move forward 1 epoch
+        
+        Period/Comma Keys:
+            - Comma (,) or <: Move back by full mosaic window (e.g., 15 epochs)
+            - Period (.) or >: Move forward by full mosaic window
+        
+        Other Shortcuts:
+            - 'A': Toggle spectrogram selection mode
+        """
+        key = event.key()
         n_epochs = self.get_n_epochs()
         
         if key == Qt.Key.Key_Left:
@@ -815,26 +873,37 @@ class PreviewWindow(QWidget):
             if self.current_epoch > 0:
                 self.current_epoch -= 1
                 self.update_epoch_displays()
+                print(f"Navigating to epoch {self.current_epoch} (Left arrow)")
                 
         elif key == Qt.Key.Key_Right:
             # Move forward 1 epoch
             if self.current_epoch < n_epochs - 1:
                 self.current_epoch += 1
                 self.update_epoch_displays()
+                print(f"Navigating to epoch {self.current_epoch} (Right arrow)")
                 
-        elif key == Qt.Key.Key_Comma or key == Qt.Key.Key_Less: # < (Shift+,)
+        elif key == Qt.Key.Key_Comma or key == Qt.Key.Key_Less:  # < (Shift+,)
             # Move back by mosaic window page
             new_epoch = max(0, self.current_epoch - self.mosaic_epochs_to_show)
             if new_epoch != self.current_epoch:
                 self.current_epoch = new_epoch
                 self.update_epoch_displays()
+                print(f"Navigating to epoch {self.current_epoch} (Page back by {self.mosaic_epochs_to_show})")
                 
-        elif key == Qt.Key.Key_Period or key == Qt.Key.Key_Greater: # > (Shift+.)
+        elif key == Qt.Key.Key_Period or key == Qt.Key.Key_Greater:  # > (Shift+.)
             # Move forward by mosaic window page
             new_epoch = min(n_epochs - 1, self.current_epoch + self.mosaic_epochs_to_show)
             if new_epoch != self.current_epoch:
                 self.current_epoch = new_epoch
                 self.update_epoch_displays()
+                print(f"Navigating to epoch {self.current_epoch} (Page forward by {self.mosaic_epochs_to_show})")
+        
+        elif key == Qt.Key.Key_A:
+            # Toggle spectrogram selection mode
+            if hasattr(self, 'spectrogram_widget'):
+                self.spectrogram_widget.toggle_selection_mode()
+                # Ensure it gets focus so subsequent clicks work well
+                self.spectrogram_widget.setFocus()
         
         else:
             super().keyPressEvent(event)
@@ -1059,16 +1128,5 @@ class PreviewWindow(QWidget):
             import traceback
             traceback.print_exc()
 
-    def keyPressEvent(self, event):
-        """Handle key press events for global shortcuts."""
-        key = event.key()
-        
-        # Forward 'A' key to spectrogram for selection mode toggle
-        if key == Qt.Key.Key_A:
-            if hasattr(self, 'spectrogram_widget'):
-                self.spectrogram_widget.toggle_selection_mode()
-                # Ensure it gets focus so subsequent clicks work well
-                self.spectrogram_widget.setFocus()
-        else:
-            super().keyPressEvent(event)
+
 

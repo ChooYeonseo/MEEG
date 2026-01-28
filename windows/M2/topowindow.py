@@ -206,6 +206,7 @@ class TopographyWidget(QWidget):
         self.fixed_scale_btn.setChecked(False)
         self.fixed_scale_btn.clicked.connect(self.on_fixed_scale_clicked)
         self.fixed_scale_btn.setStyleSheet(f"color: {self.theme_colors['fg_primary']};")
+        self.fixed_scale_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         control_layout.addWidget(self.fixed_scale_btn)
         
         # Create radio buttons for predefined bands
@@ -219,6 +220,7 @@ class TopographyWidget(QWidget):
             radio.clicked.connect(lambda checked, name=band_name: self.on_band_selected(name))
             # Apply theme colors to radio button text
             radio.setStyleSheet(f"color: {self.theme_colors['fg_primary']};")
+            radio.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             control_layout.addWidget(radio)
         
         # Default selection (Alpha)
@@ -233,6 +235,7 @@ class TopographyWidget(QWidget):
         self.band_buttons['Custom'] = self.custom_radio
         self.custom_radio.clicked.connect(self.on_custom_clicked)
         self.custom_radio.setStyleSheet(f"color: {self.theme_colors['fg_primary']};")
+        self.custom_radio.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         control_layout.addWidget(self.custom_radio)
         
         control_layout.addStretch()
