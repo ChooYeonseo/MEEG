@@ -354,7 +354,8 @@ class FullViewVideoDialog(QDialog):
             return
             
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        output_fps = self.fps_spinbox.value()
+        # Use source video FPS to maintain original speed
+        output_fps = self.video_fps
         
         # Create video writer
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')

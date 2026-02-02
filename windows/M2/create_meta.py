@@ -1,4 +1,4 @@
-def create_meta(name, memo="", date="", activated_channels=None):
+def create_meta(name, memo="", date="", activated_channels=None, sampling_rate=None):
     """
     Create metadata dictionary from filename and additional parameters.
     
@@ -12,6 +12,8 @@ def create_meta(name, memo="", date="", activated_channels=None):
         Recording date
     activated_channels : list
         List of activated channel names (will be sorted alphabetically)
+    sampling_rate : float or None
+        Sampling rate in Hz
     
     Returns:
     --------
@@ -29,7 +31,8 @@ def create_meta(name, memo="", date="", activated_channels=None):
         "ExtraData": Unique_Meta(name),
         "Memo": memo,
         "Date": date,
-        "ActivatedChannels": sorted(activated_channels)
+        "ActivatedChannels": sorted(activated_channels),
+        "SamplingRate": sampling_rate
     }
     
     return meta_data

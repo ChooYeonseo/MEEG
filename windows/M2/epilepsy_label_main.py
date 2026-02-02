@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Tuple
 import numpy as np
 import pandas as pd
+from scipy import signal as scipy_signal
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QMessageBox, QTextEdit, QSpinBox, QPushButton,
                              QGroupBox, QFormLayout, QSplitter, QFileDialog,
@@ -1441,6 +1442,39 @@ class EpilepsyLabelWindow(QWidget):
                 self.show_message_box(QMessageBox.Icon.Warning, "No Data", "No data available to save.")
                 return
 
+            # 0. Ask about sampling rate before proceeding
+            current_sr = self.sampling_rate
+            target_sr = current_sr  # Default: no resampling
+            
+            # Show current sampling rate and ask if user wants to resample
+            reply = QMessageBox.question(
+                self, "Sampling Rate",
+                f"Current sampling rate: {current_sr} Hz\n\n"
+                f"Do you want to proceed with this sampling rate?\n\n"
+                f"Click 'Yes' to proceed with {current_sr} Hz\n"
+                f"Click 'No' to resample the data to a different rate",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.No:
+                # Ask for target sampling rate
+                new_sr, ok = QInputDialog.getDouble(
+                    self, "Resample Data",
+                    f"Current: {current_sr} Hz\n\nEnter target sampling rate (Hz):",
+                    value=min(current_sr, 256.0),  # Default to 256 Hz or current if lower
+                    min=1.0,
+                    max=current_sr,
+                    decimals=1
+                )
+                if not ok:
+                    return
+                target_sr = new_sr
+                
+                if target_sr == current_sr:
+                    self.show_message_box(QMessageBox.Icon.Information, "No Change",
+                                         f"Target rate equals current rate ({current_sr} Hz). No resampling needed.")
+
             # 1. Ask for Data ID (e.g. M25001)
             data_id, ok = QInputDialog.getText(
                 self, "File to DB", 
@@ -1523,13 +1557,20 @@ class EpilepsyLabelWindow(QWidget):
                     file_path = save_dir / file_name
                     
                     # Get data for this channel
-                    channel_data = epoch_data[channel_name]
+                    channel_data = epoch_data[channel_name].values
+                    
+                    # Resample if target sampling rate differs from current
+                    if target_sr != current_sr:
+                        # Calculate new number of samples
+                        original_samples = len(channel_data)
+                        new_samples = int(original_samples * target_sr / current_sr)
+                        channel_data = scipy_signal.resample(channel_data, new_samples)
                     
                     # Round
-                    channel_data_rounded = channel_data.round(precision)
+                    channel_data_rounded = np.round(channel_data, precision)
                     
                     # Save
-                    channel_data_rounded.to_csv(file_path, index=False, header=False)
+                    pd.Series(channel_data_rounded).to_csv(file_path, index=False, header=False)
                     saved_count += 1
             
             progress.setValue(n_epochs)
@@ -1570,7 +1611,8 @@ class EpilepsyLabelWindow(QWidget):
                     name=data_id,
                     memo=memo_text,
                     date=date_str,
-                    activated_channels=activated_channels
+                    activated_channels=activated_channels,
+                    sampling_rate=target_sr  # Use target SR (after resampling)
                 )
                 
                 # Save as JSON
@@ -1585,10 +1627,17 @@ class EpilepsyLabelWindow(QWidget):
                 print(f"Error saving metadata file: {e}")
                 
             if saved_count > 0:
+                # Build success message with resampling info
+                sr_info = ""
+                if target_sr != current_sr:
+                    sr_info = f"\nResampled: {current_sr} Hz → {target_sr} Hz"
+                else:
+                    sr_info = f"\nSampling Rate: {current_sr} Hz"
+                
                 self.show_message_box(QMessageBox.Icon.Information, 
                                     "Success", 
                                     f"Saved {saved_count} files to:\n{directory}\n\n"
-                                    f"Covered {n_epochs} epochs + Labels + Metadata.")
+                                    f"Covered {n_epochs} epochs + Labels + Metadata.{sr_info}")
                 
                 # Cache Deletion Option
                 if self.cache_key:

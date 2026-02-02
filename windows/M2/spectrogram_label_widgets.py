@@ -1,7 +1,8 @@
 """
 Spectrogram and Label Windows for MEEG Seizure Labeling.
 
-This module contains the spectrogram display and Racine score labeling widgets.
+This module contains the spectrogram display and seizure phase labeling widgets.
+Labeling: Interictal, Preictal, Ictal, Postictal
 """
 
 import numpy as np
@@ -291,21 +292,36 @@ class SpectrogramWidget(QWidget):
 
 
 class LabelWidget(QWidget):
-    """Widget for displaying and editing Racine seizure scores (0-8)."""
+    """Widget for displaying and editing seizure phase labels.
+    
+    Labels:
+        0 = Interictal (key 1, green)
+        1 = Preictal (key 2, orange)
+        2 = Ictal (key 3, red)
+        3 = Postictal (key 4, dark purple)
+        4 = NaN/unusable (key N, gray)
+    """
     
     # Signal emitted when a label is changed
-    label_changed = pyqtSignal(int, int)  # epoch, score
+    label_changed = pyqtSignal(int, int)  # epoch, phase
     # Signal emitted when spacebar is pressed (for video tab switch)
     spacebar_pressed = pyqtSignal(int)  # current epoch
     
-    # Special label for NaN (unusable data)
-    NAN_LABEL = 9  # Use 9 to represent NaN/unusable
+    # Label constants for seizure phases (CSV values)
+    INTERICTAL = 0  # Key 1
+    PREICTAL = 1    # Key 2
+    ICTAL = 2       # Key 3
+    POSTICTAL = 3   # Key 4
+    NAN_LABEL = 4   # Key N - unusable data
+    
+    # Phase names for display
+    PHASE_NAMES = ['Interictal', 'Preictal', 'Ictal', 'Postictal', 'NaN']
     
     def __init__(self, theme_colors=None, parent=None):
         super().__init__(parent)
         self.theme_colors = theme_colors or {'bg_primary': '#1a1a1a', 'fg_primary': '#ffffff'}
         self.n_epochs = 0
-        self.labels = np.array([])  # 0-8 Racine scores, 9 = NaN
+        self.labels = np.array([])  # 0-3 phase labels, 4 = NaN
         self.current_epoch = 0
         self.epochs_to_show = 5
         self.mosaic_epochs_to_show = 15  # For < > key navigation
@@ -315,7 +331,7 @@ class LabelWidget(QWidget):
         self.range_end_epoch = None    # Set by W or E key
         self.range_selection_active = False
         
-        # Color scheme: green for 0, red gradient for 1-8, gray for NaN
+        # Color scheme for seizure phases
         self.colors = self.generate_colors()
         
         self.init_ui()
@@ -326,7 +342,7 @@ class LabelWidget(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         
         # Title
-        title_label = QLabel("Racine Score Labeling (0-8)")
+        title_label = QLabel("Seizure Phase Labeling (1-4: Interictal/Preictal/Ictal/Postictal)")
         title_font = QFont()
         title_font.setPointSize(10)
         title_font.setBold(True)
@@ -352,18 +368,21 @@ class LabelWidget(QWidget):
         self.update_plot()
         
     def generate_colors(self):
-        """Generate color scheme: green for 0, red gradient for 1-8, gray for NaN."""
+        """Generate color scheme for seizure phases.
+        
+        Colors:
+            Interictal (0): Green
+            Preictal (1): Orange
+            Ictal (2): Red
+            Postictal (3): Dark Purple
+            NaN (4): Gray
+        """
         colors = {}
-        colors[0] = np.array([0.0, 0.8, 0.0, 1.0])  # Green
-        
-        # Red gradient from light to dark
-        for i in range(1, 9):
-            # Darker red as score increases
-            intensity = 1.0 - (i - 1) / 8.0 * 0.6  # From 1.0 to 0.4
-            colors[i] = np.array([1.0, intensity * 0.2, intensity * 0.2, 1.0])
-        
-        # NaN color (gray with crosshatch pattern indicator)
-        colors[self.NAN_LABEL] = np.array([0.5, 0.5, 0.5, 1.0])  # Gray for NaN
+        colors[self.INTERICTAL] = np.array([0.0, 0.8, 0.0, 1.0])      # Green
+        colors[self.PREICTAL] = np.array([1.0, 0.5, 0.0, 1.0])        # Orange
+        colors[self.ICTAL] = np.array([1.0, 0.0, 0.0, 1.0])           # Red
+        colors[self.POSTICTAL] = np.array([0.4, 0.0, 0.6, 1.0])       # Dark Purple
+        colors[self.NAN_LABEL] = np.array([0.5, 0.5, 0.5, 1.0])       # Gray for NaN
             
         return colors
         
@@ -379,14 +398,26 @@ class LabelWidget(QWidget):
         self.setFocus()
             
     def keyPressEvent(self, event):
-        """Handle keyboard input for labeling using Qt events."""
+        """Handle keyboard input for labeling using Qt events.
+        
+        Key mappings:
+            1 = Interictal (CSV value 0)
+            2 = Preictal (CSV value 1)
+            3 = Ictal (CSV value 2)
+            4 = Postictal (CSV value 3)
+            N = NaN/unusable
+        """
         key = event.key()
         
-        # Handle number keys 0-8 for labeling
-        if Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
-            score = key - Qt.Key.Key_0
-            if score <= 8:
-                self._apply_label(score)
+        # Handle number keys 1-4 for seizure phase labeling
+        if key == Qt.Key.Key_1:
+            self._apply_label(self.INTERICTAL)  # Key 1 -> Interictal (CSV 0)
+        elif key == Qt.Key.Key_2:
+            self._apply_label(self.PREICTAL)    # Key 2 -> Preictal (CSV 1)
+        elif key == Qt.Key.Key_3:
+            self._apply_label(self.ICTAL)       # Key 3 -> Ictal (CSV 2)
+        elif key == Qt.Key.Key_4:
+            self._apply_label(self.POSTICTAL)   # Key 4 -> Postictal (CSV 3)
         
         # N key - mark as NaN (unusable data)
         elif key == Qt.Key.Key_N:
@@ -455,8 +486,8 @@ class LabelWidget(QWidget):
             # Let parent handle other keys
             super().keyPressEvent(event)
     
-    def _apply_label(self, score):
-        """Apply a label to current epoch or selected range."""
+    def _apply_label(self, phase):
+        """Apply a phase label to current epoch or selected range."""
         if self.range_selection_active and self.range_start_epoch is not None and self.range_end_epoch is not None:
             # Apply to entire range
             start = min(self.range_start_epoch, self.range_end_epoch)
@@ -464,21 +495,21 @@ class LabelWidget(QWidget):
             
             for epoch_idx in range(start, end + 1):
                 if 0 <= epoch_idx < self.n_epochs:
-                    self.labels[epoch_idx] = score
+                    self.labels[epoch_idx] = phase
             
-            label_name = "NaN" if score == self.NAN_LABEL else str(score)
+            label_name = self.PHASE_NAMES[phase] if phase < len(self.PHASE_NAMES) else str(phase)
             print(f"Applied label {label_name} to epochs {start}-{end} ({end - start + 1} epochs)")
             
             # Clear range selection
             self._cancel_range_selection()
             
             # Emit signal for last epoch in range
-            self.label_changed.emit(end, score)
+            self.label_changed.emit(end, phase)
             self.update_plot()
         elif 0 <= self.current_epoch < self.n_epochs:
             # Apply to single epoch
-            self.labels[self.current_epoch] = score
-            self.label_changed.emit(self.current_epoch, score)
+            self.labels[self.current_epoch] = phase
+            self.label_changed.emit(self.current_epoch, phase)
             self.update_plot()
     
     def _show_range_selection_message(self):
@@ -496,13 +527,13 @@ class LabelWidget(QWidget):
         msg.setIcon(QMessageBox.Icon.Information)
         msg.setWindowTitle("Range Selected")
         msg.setText(f"You have selected {n_selected} epochs (epoch {start} to {end}).")
-        msg.setInformativeText("Press a number key (0-8) to label all selected epochs,\nor press N for NaN.\nPress ESC to cancel.")
+        msg.setInformativeText("Press 1-4 to label seizure phase:\n1=Interictal, 2=Preictal, 3=Ictal, 4=Postictal\nor press N for NaN. Press ESC to cancel.")
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
         
         # Keep focus on this widget for label input
         self.setFocus()
-        print(f"Range selected: epochs {start}-{end} ({n_selected} epochs). Press 0-8 or N to label.")
+        print(f"Range selected: epochs {start}-{end} ({n_selected} epochs). Press 1-4 (Interictal/Preictal/Ictal/Postictal) or N for NaN.")
     
     def _cancel_range_selection(self):
         """Cancel the current range selection."""
@@ -529,22 +560,23 @@ class LabelWidget(QWidget):
         end_epoch = min(self.n_epochs, start_epoch + self.epochs_to_show)
         start_epoch = max(0, end_epoch - self.epochs_to_show)
         
-        # Create label image (9 rows for scores 0-8, n_epochs columns)
-        label_img = np.zeros((9, end_epoch - start_epoch, 4))
+        # Create label image (4 rows for seizure phases, n_epochs columns)
+        n_phases = 4  # Interictal, Preictal, Ictal, Postictal
+        label_img = np.zeros((n_phases, end_epoch - start_epoch, 4))
         
         for i, epoch_idx in enumerate(range(start_epoch, end_epoch)):
-            score = int(self.labels[epoch_idx])
-            for row in range(9):
-                if score == self.NAN_LABEL:
+            phase = int(self.labels[epoch_idx])
+            for row in range(n_phases):
+                if phase == self.NAN_LABEL:
                     # NaN label - show gray across all rows
                     label_img[row, i, :] = self.colors[self.NAN_LABEL]
-                elif row == score:
-                    label_img[row, i, :] = self.colors[score]
+                elif row == phase:
+                    label_img[row, i, :] = self.colors[phase]
                 else:
                     label_img[row, i, :] = [0.1, 0.1, 0.1, 1.0]  # Dark gray
         
         # Display the label image
-        extent = [start_epoch, end_epoch, 0, 9]
+        extent = [start_epoch, end_epoch, 0, n_phases]
         self.ax.imshow(label_img, aspect='auto', origin='lower', extent=extent,
                       interpolation='nearest')
         
@@ -567,16 +599,17 @@ class LabelWidget(QWidget):
         
         # Set axis properties
         self.ax.set_xlabel('Epoch', fontsize=9, color=self.theme_colors['fg_primary'])
-        self.ax.set_ylabel('Racine Score', fontsize=9, color=self.theme_colors['fg_primary'])
-        self.ax.set_yticks([0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5])
-        self.ax.set_yticklabels(['0', '1', '2', '3', '4', '5', '6', '7', '8'], color=self.theme_colors['fg_primary'])
+        self.ax.set_ylabel('Seizure Phase', fontsize=9, color=self.theme_colors['fg_primary'])
+        self.ax.set_yticks([0.5, 1.5, 2.5, 3.5])
+        self.ax.set_yticklabels(['Interictal', 'Preictal', 'Ictal', 'Postictal'], 
+                                 color=self.theme_colors['fg_primary'], fontsize=7)
         
         # Set x-axis ticks at every epoch (increment of 1)
         x_ticks = np.arange(start_epoch, end_epoch + 1, 1)
         self.ax.set_xticks(x_ticks)
         
         self.ax.set_xlim(start_epoch, end_epoch)
-        self.ax.set_ylim(0, 9)
+        self.ax.set_ylim(0, n_phases)
         self.ax.tick_params(colors=self.theme_colors['fg_primary'], labelsize=8)
         self.ax.spines['bottom'].set_color(self.theme_colors['fg_primary'])
         self.ax.spines['left'].set_color(self.theme_colors['fg_primary'])
@@ -601,9 +634,9 @@ class LabelWidget(QWidget):
         self.mosaic_epochs_to_show = max(1, n_epochs)
         
     def initialize_labels(self, n_epochs):
-        """Initialize label array with zeros."""
+        """Initialize label array with Interictal (0) for all epochs."""
         self.n_epochs = n_epochs
-        self.labels = np.zeros(n_epochs, dtype=int)
+        self.labels = np.zeros(n_epochs, dtype=int)  # All start as Interictal (0)
         self.current_epoch = 0
         self.update_plot()
     
