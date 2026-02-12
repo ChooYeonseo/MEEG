@@ -727,7 +727,7 @@ class EpilepsyLabelWindow(QWidget):
         eeg_layout = QFormLayout(eeg_group)
         
         self.mosaic_epochs_combo = QComboBox()
-        self.mosaic_epochs_combo.addItems(["1", "3", "5", "7", "9", "11", "13", "15"])
+        self.mosaic_epochs_combo.addItems(["1", "3", "5", "7", "9", "11", "13", "15", "Full"])
         self.mosaic_epochs_combo.setCurrentText(str(self.mosaic_epochs_to_show))
         self.mosaic_epochs_combo.currentTextChanged.connect(self.on_mosaic_epochs_changed)
         eeg_layout.addRow("Epochs to Show:", self.mosaic_epochs_combo)
@@ -740,7 +740,7 @@ class EpilepsyLabelWindow(QWidget):
         
         # Epochs to show
         self.label_epochs_combo = QComboBox()
-        self.label_epochs_combo.addItems(["1", "3", "5", "7", "9", "11", "13", "15"])
+        self.label_epochs_combo.addItems(["1", "3", "5", "7", "9", "11", "13", "15", "Full"])
         self.label_epochs_combo.setCurrentText(str(self.label_epochs_to_show))
         self.label_epochs_combo.currentTextChanged.connect(self.on_label_epochs_changed)
         label_layout.addRow("Epochs to Show:", self.label_epochs_combo)
@@ -767,6 +767,12 @@ class EpilepsyLabelWindow(QWidget):
         status_layout.addStretch()
         
         label_layout.addRow("Status:", status_widget)
+        
+        # Auto Labeling button
+        self.auto_label_btn = QPushButton("🔄 Auto Labeling")
+        self.auto_label_btn.clicked.connect(self.on_auto_label_clicked)
+        self.auto_label_btn.setToolTip("Automatically label preictal and postictal epochs based on ictal intervals")
+        label_layout.addRow("", self.auto_label_btn)
         
         horizontal_layout.addWidget(label_group)
         
@@ -931,14 +937,20 @@ class EpilepsyLabelWindow(QWidget):
     
     def on_mosaic_epochs_changed(self, value):
         """Handle mosaic epochs to show change."""
-        self.mosaic_epochs_to_show = int(value)
+        if value == "Full":
+            self.mosaic_epochs_to_show = self.get_n_epochs()
+        else:
+            self.mosaic_epochs_to_show = int(value)
         self.mosaic_plotter.set_epochs_to_show(self.mosaic_epochs_to_show)
         # Also update label widget for keyboard navigation
         self.label_widget.set_mosaic_epochs_to_show(self.mosaic_epochs_to_show)
         
     def on_label_epochs_changed(self, value):
         """Handle label epochs to show change."""
-        self.label_epochs_to_show = int(value)
+        if value == "Full":
+            self.label_epochs_to_show = self.get_n_epochs()
+        else:
+            self.label_epochs_to_show = int(value)
         self.label_widget.set_epochs_to_show(self.label_epochs_to_show)
     
     def on_topo_toggle_clicked(self, checked):
@@ -1210,6 +1222,148 @@ class EpilepsyLabelWindow(QWidget):
                     font-size: 10px;
                 }
             """)
+    
+    def on_auto_label_clicked(self):
+        """Handle Auto Labeling button click.
+        
+        Algorithm:
+        1. Find continuous ictal intervals (label 2)
+        2. Ask user for preictal and postictal epoch counts
+        3. Label preictal epochs (1) before ictal intervals
+        4. Label postictal epochs (3) after ictal intervals
+        5. Priority: label 2 > label 3 > label 1 > label 0
+        """
+        # Get current labels
+        labels = self.label_widget.get_labels()
+        n_epochs = len(labels)
+        
+        if n_epochs == 0:
+            self.show_message_box(QMessageBox.Icon.Warning, "No Data", 
+                                   "No epochs available for labeling.")
+            return
+        
+        # Step 1: Find continuous ictal intervals (label 2)
+        ictal_intervals = []
+        in_ictal = False
+        ictal_start = None
+        
+        for i in range(n_epochs):
+            if labels[i] == 2:  # Ictal
+                if not in_ictal:
+                    in_ictal = True
+                    ictal_start = i
+            else:
+                if in_ictal:
+                    # End of ictal interval
+                    ictal_intervals.append((ictal_start, i - 1))
+                    in_ictal = False
+        
+        # Handle case where ictal extends to the end
+        if in_ictal:
+            ictal_intervals.append((ictal_start, n_epochs - 1))
+        
+        # Check if any ictal intervals found
+        if not ictal_intervals:
+            self.show_message_box(QMessageBox.Icon.Warning, "No Ictal Intervals", 
+                                   "No ictal epochs (label 2) found.\n\n"
+                                   "Please label ictal epochs first using key '3' before using auto-labeling.")
+            return
+        
+        # Show found ictal intervals
+        interval_text = "\n".join([f"  - Epochs {start} to {end} ({end - start + 1} epochs)" 
+                                   for start, end in ictal_intervals])
+        
+        # Step 2: Ask user for preictal interval using InputDialog
+        preictal_text, ok1 = QInputDialog.getText(
+            self, "Preictal Interval",
+            f"Found {len(ictal_intervals)} ictal interval(s):\n{interval_text}\n\n"
+            f"Enter the number of preictal epochs to label before each ictal interval:\n"
+            f"(e.g., '300' for 300 epochs)",
+            text="300"
+        )
+        
+        if not ok1:
+            return
+        
+        # Parse preictal value
+        try:
+            # Remove any text like "epoch" or "epochs" and get just the number
+            preictal_str = preictal_text.lower().replace("epoch", "").replace("s", "").strip()
+            preictal_epochs = int(preictal_str)
+            if preictal_epochs < 0:
+                raise ValueError("Negative value")
+        except ValueError:
+            self.show_message_box(QMessageBox.Icon.Warning, "Invalid Input", 
+                                   f"Invalid preictal value: '{preictal_text}'\n\n"
+                                   f"Please enter a valid number (e.g., '300').")
+            return
+        
+        # Step 3: Ask user for postictal interval
+        postictal_text, ok2 = QInputDialog.getText(
+            self, "Postictal Interval",
+            f"Enter the number of postictal epochs to label after each ictal interval:\n"
+            f"(e.g., '300' for 300 epochs)",
+            text="300"
+        )
+        
+        if not ok2:
+            return
+        
+        # Parse postictal value
+        try:
+            postictal_str = postictal_text.lower().replace("epoch", "").replace("s", "").strip()
+            postictal_epochs = int(postictal_str)
+            if postictal_epochs < 0:
+                raise ValueError("Negative value")
+        except ValueError:
+            self.show_message_box(QMessageBox.Icon.Warning, "Invalid Input", 
+                                   f"Invalid postictal value: '{postictal_text}'\n\n"
+                                   f"Please enter a valid number (e.g., '300').")
+            return
+        
+        # Step 4: Apply auto-labeling with priority: label 2 > label 3 > label 1 > label 0
+        # Create new labels array, starting from current labels
+        new_labels = labels.copy()
+        
+        preictal_count = 0
+        postictal_count = 0
+        
+        for ictal_start, ictal_end in ictal_intervals:
+            # Label preictal epochs (before ictal start)
+            # Priority: Only label if current label is lower priority (0 or 1)
+            pre_start = max(0, ictal_start - preictal_epochs)
+            for i in range(pre_start, ictal_start):
+                # Priority check: label 2 > label 3 > label 1 > label 0
+                # Only overwrite if current label is 0 (interictal) - preictal (1) has lower priority than postictal (3)
+                if new_labels[i] == 0:
+                    new_labels[i] = 1  # Preictal
+                    preictal_count += 1
+            
+            # Label postictal epochs (after ictal end)
+            # Priority: Only label if current label is lower priority (0 or 1)
+            post_end = min(n_epochs, ictal_end + 1 + postictal_epochs)
+            for i in range(ictal_end + 1, post_end):
+                # Priority check: label 2 > label 3 > label 1 > label 0
+                # Can overwrite 0 (interictal) or 1 (preictal)
+                if new_labels[i] in [0, 1]:
+                    new_labels[i] = 3  # Postictal
+                    postictal_count += 1
+        
+        # Update label widget
+        self.label_widget.labels = new_labels
+        self.label_widget.update_plot()
+        
+        # Show summary
+        self.show_message_box(QMessageBox.Icon.Information, "Auto Labeling Complete", 
+                               f"Auto-labeling completed!\n\n"
+                               f"Ictal intervals found: {len(ictal_intervals)}\n"
+                               f"Preictal epochs labeled: {preictal_count}\n"
+                               f"Postictal epochs labeled: {postictal_count}\n\n"
+                               f"Priority: Ictal (2) > Postictal (3) > Preictal (1) > Interictal (0)\n\n"
+                               f"Remember to save your labels!")
+        
+        print(f"Auto-labeling complete: {len(ictal_intervals)} ictal intervals, "
+              f"{preictal_count} preictal, {postictal_count} postictal epochs labeled")
 
     # ----------------------------------------------------------------------
     # Save Functionality Handlers

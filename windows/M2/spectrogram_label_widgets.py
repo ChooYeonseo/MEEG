@@ -178,6 +178,13 @@ class SpectrogramWidget(QWidget):
         self.ax.spines['top'].set_color(self.theme_colors['fg_primary'])
         self.ax.spines['right'].set_color(self.theme_colors['fg_primary'])
         
+        # Disable scientific notation on x-axis
+        from matplotlib.ticker import ScalarFormatter, MaxNLocator
+        self.ax.xaxis.set_major_locator(MaxNLocator(nbins=10, integer=True))
+        formatter = ScalarFormatter(useOffset=False)
+        formatter.set_scientific(False)
+        self.ax.xaxis.set_major_formatter(formatter)
+        
         self.figure.tight_layout()
         
         # Add diamond marker above the plot after tight_layout
@@ -560,12 +567,17 @@ class LabelWidget(QWidget):
         end_epoch = min(self.n_epochs, start_epoch + self.epochs_to_show)
         start_epoch = max(0, end_epoch - self.epochs_to_show)
         
-        # Create label image (4 rows for seizure phases, n_epochs columns)
-        n_phases = 4  # Interictal, Preictal, Ictal, Postictal
-        label_img = np.zeros((n_phases, end_epoch - start_epoch, 4))
+        visible_epochs = end_epoch - start_epoch
         
-        for i, epoch_idx in enumerate(range(start_epoch, end_epoch)):
-            phase = int(self.labels[epoch_idx])
+        # Create label image (4 rows for seizure phases, visible_epochs columns)
+        n_phases = 4  # Interictal, Preictal, Ictal, Postictal
+        label_img = np.zeros((n_phases, visible_epochs, 4))
+        
+        # Vectorized approach for faster rendering
+        visible_labels = self.labels[start_epoch:end_epoch]
+        
+        for i, phase in enumerate(visible_labels):
+            phase = int(phase)
             for row in range(n_phases):
                 if phase == self.NAN_LABEL:
                     # NaN label - show gray across all rows
@@ -589,10 +601,13 @@ class LabelWidget(QWidget):
             r_start = min(range_start, range_end)
             r_end = max(range_start, range_end)
             
-            # Draw cyan highlight box for selected range
-            for r_epoch in range(r_start, r_end + 1):
-                if start_epoch <= r_epoch < end_epoch:
-                    self.ax.axvspan(r_epoch, r_epoch + 1, alpha=0.3, color='cyan', zorder=5)
+            # Only draw highlight for visible range
+            vis_r_start = max(r_start, start_epoch)
+            vis_r_end = min(r_end, end_epoch - 1)
+            
+            if vis_r_start <= vis_r_end:
+                # Draw single rectangle for efficiency
+                self.ax.axvspan(vis_r_start, vis_r_end + 1, alpha=0.3, color='cyan', zorder=5)
         
         # Highlight current epoch
         self.ax.axvline(self.current_epoch + 0.5, color='yellow', linewidth=3, linestyle='-')
@@ -604,9 +619,17 @@ class LabelWidget(QWidget):
         self.ax.set_yticklabels(['Interictal', 'Preictal', 'Ictal', 'Postictal'], 
                                  color=self.theme_colors['fg_primary'], fontsize=7)
         
-        # Set x-axis ticks at every epoch (increment of 1)
-        x_ticks = np.arange(start_epoch, end_epoch + 1, 1)
-        self.ax.set_xticks(x_ticks)
+        # Set x-axis ticks - limit number of ticks for performance
+        # Use ScalarFormatter to prevent scientific notation
+        from matplotlib.ticker import ScalarFormatter, MaxNLocator
+        
+        # Use MaxNLocator to limit number of ticks for performance
+        self.ax.xaxis.set_major_locator(MaxNLocator(nbins=min(visible_epochs, 15), integer=True))
+        
+        # Disable scientific notation
+        formatter = ScalarFormatter(useOffset=False)
+        formatter.set_scientific(False)
+        self.ax.xaxis.set_major_formatter(formatter)
         
         self.ax.set_xlim(start_epoch, end_epoch)
         self.ax.set_ylim(0, n_phases)
@@ -650,9 +673,4 @@ class LabelWidget(QWidget):
     def get_labels(self):
         """Get the current labels array."""
         return self.labels.copy()
-        
-    def set_labels(self, labels):
-        """Set the labels array."""
-        if len(labels) == self.n_epochs:
-            self.labels = labels.copy()
-            self.update_plot()
+
